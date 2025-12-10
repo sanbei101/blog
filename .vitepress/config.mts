@@ -6,6 +6,12 @@ export default defineConfig({
   description: "Sanbei的博客",
   cleanUrls: true,
   head: [["link", { rel: "icon", href: "/favicon.png" }]],
+  markdown: {
+    theme: {
+      light: "github-light",
+      dark: "github-dark",
+    },
+  },
   themeConfig: {
     nav: [
       { text: "首页", link: "/" },
