@@ -26,5 +26,8 @@ export default defineConfig({
       hyphenToSpace: true,
       debugPrint: true,
     }),
+    search: {
+      provider: "local",
+    },
   },
 });
