@@ -4,7 +4,8 @@ import { generateSidebar } from "vitepress-sidebar";
 export default defineConfig({
   title: "Sanbei blog",
   description: "Sanbei的博客",
-
+  cleanUrls: true,
+  head: [["link", { rel: "icon", href: "/favicon.png" }]],
   themeConfig: {
     nav: [
       { text: "首页", link: "/" },
