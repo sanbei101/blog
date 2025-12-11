@@ -13,7 +13,7 @@ export default defineConfig({
     },
   },
   sitemap: {
-    hostname: "https://sanbei101.cn",
+    hostname: "https://blog.sanbei101.cn",
   },
   lastUpdated: true,
   themeConfig: {
