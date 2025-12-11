@@ -5,7 +5,24 @@ export default defineConfig({
   title: "Sanbei blog",
   description: "Sanbei的博客",
   cleanUrls: true,
-  head: [["link", { rel: "icon", href: "/favicon.png" }]],
+  head: [
+    ["link", { rel: "icon", href: "/favicon.png" }],
+    [
+      "script",
+      {
+        async: "",
+        src: "https://www.googletagmanager.com/gtag/js?id=G-W4VQ12KR96",
+      },
+    ],
+    [
+      "script",
+      {},
+      `window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-W4VQ12KR96');`,
+    ],
+  ],
   markdown: {
     theme: {
       light: "github-light",
