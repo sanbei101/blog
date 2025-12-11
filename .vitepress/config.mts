@@ -12,6 +12,10 @@ export default defineConfig({
       dark: "github-dark",
     },
   },
+  sitemap: {
+    hostname: "https://sanbei101.cn",
+  },
+  lastUpdated: true,
   themeConfig: {
     nav: [
       { text: "首页", link: "/" },
