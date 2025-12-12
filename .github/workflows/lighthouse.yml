@@ -7,6 +7,8 @@ on:
 
 jobs:
   perf-check:
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -43,10 +45,17 @@ jobs:
         run: start-server-and-test 'pnpm run docs:preview' http://localhost:4173 'unlighthouse-ci --site http://localhost:4173 --build-static --budget 75'
 
       - name: Upload Report
-        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: unlighthouse-report
           path: .unlighthouse
           include-hidden-files: true
           retention-days: 7
+
+      - name: Deploy to GitHub Pages
+        if: always()
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .unlighthouse
+          force_orphan: true
