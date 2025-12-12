@@ -25,18 +25,8 @@ jobs:
           node-version: 24
           cache: "pnpm"
 
-      - name: Cache Puppeteer
-        uses: actions/cache@v5
-        id: puppeteer-cache
-        with:
-          path: ~/.cache/puppeteer
-          key: ${{ runner.os }}-puppeteer-global
-
       - name: Install dependencies
         run: pnpm install
-
-      - name: Build docs
-        run: pnpm run docs:build
 
       - name: Install Unlighthouse & Utils
         run: pnpm i -g @unlighthouse/cli puppeteer start-server-and-test
