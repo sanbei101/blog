@@ -34,5 +34,5 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           name: unlighthouse-report
-          path: .unlighthouse/client
-          retention-days: 30
+          path: .unlighthouse
+          retention-days: 7
