@@ -35,4 +35,5 @@ jobs:
         with:
           name: unlighthouse-report
           path: .unlighthouse
+          include-hidden-files: true
           retention-days: 7
