@@ -1,0 +1,38 @@
+name: Unlighthouse Audit
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  perf-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build docs
+        run: npm run docs:build
+
+      - name: Install Unlighthouse & Utils
+        run: npm install -g @unlighthouse/cli puppeteer start-server-and-test
+
+      - name: Run Unlighthouse
+        run: start-server-and-test 'npm run docs:preview' http://localhost:4173 'unlighthouse-ci --site http://localhost:4173 --build-static --budget 75'
+
+      - name: Upload Report
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: unlighthouse-report
+          path: .unlighthouse/client
+          retention-days: 30
