@@ -31,6 +31,9 @@ jobs:
       - name: Install Unlighthouse & Utils
         run: pnpm i -g @unlighthouse/cli puppeteer start-server-and-test
 
+      - name: Build docs
+        run: pnpm run docs:build
+
       - name: Run Unlighthouse
         run: start-server-and-test 'pnpm run docs:preview' http://localhost:4173 'unlighthouse-ci --site http://localhost:4173 --build-static --budget 75'
 
