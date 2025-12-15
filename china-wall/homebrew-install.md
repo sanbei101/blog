@@ -1,6 +1,5 @@
 ---
 title: "Homebrew 安装指南"
-date: "2025-12-10"
 description: "在Linux系统上安装Homebrew的详细步骤"
 ---
 
