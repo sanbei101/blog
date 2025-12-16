@@ -115,6 +115,5 @@ sudo launchctl unload com.eagleyun.sase.servicemanager.plist
 3. `kill`进程
 
 ```shell
-sudo killall YunshuManager
-sudo killall com.eagleyun.sase.helper
+sudo pkill -f -i yunshu
 ```
