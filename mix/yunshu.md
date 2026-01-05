@@ -20,9 +20,9 @@ mac@user~> sudo fd -i "com.google.Chrome.plist" / 2>/dev/null
 
 查询结果:
 
-/Library/Managed Preferences/agiuser/com.google.Chrome.plist
-/System/Volumes/Data/Library/Managed Preferences/agiuser/com.google.Chrome.plist
-/System/Volumes/Data/Users/agiuser/Library/Preferences/com.google.Chrome.plist
+/Library/Managed Preferences/xxx/com.google.Chrome.plist
+/System/Volumes/Data/Library/Managed Preferences/xxx/com.google.Chrome.plist
+/System/Volumes/Data/Users/xxx/Library/Preferences/com.google.Chrome.plist
 /Users/user/Library/Preferences/com.google.Chrome.plist
 ```
 
@@ -30,7 +30,7 @@ mac@user~> sudo fd -i "com.google.Chrome.plist" / 2>/dev/null
 
 `/Users/user/Library/Preferences/com.google.Chrome.plist`是用户级别的,记录了一些浏览器的窗口大小等信息,与策略无关
 
-其中真正起作用的实际上是这个`/Library/ManagedPreferences/agiuser/com.google.Chrome.plist`文件
+其中真正起作用的实际上是这个`/Library/ManagedPreferences/xxx/com.google.Chrome.plist`文件
 他的内容应该为
 
 ```xml
@@ -53,19 +53,19 @@ ExtensionInstallForcelist = (
 1. 删除策略文件
 
 ```shell
-sudo rm -f "/Library/Managed Preferences/agiuser/com.google.Chrome.plist" #注意这里有个空格,必须用引号括起来
+sudo rm -f "/Library/Managed Preferences/xxx/com.google.Chrome.plist" #注意这里有个空格,必须用引号括起来
 ```
 
 2. 立刻创建一个空的假文件
 
 ```shell
-sudo touch "/Library/Managed Preferences/agiuser/com.google.Chrome.plist"
+sudo touch "/Library/Managed Preferences/xxx/com.google.Chrome.plist"
 ```
 
 3. 给文件加上"无敌"锁
 
 ```shell
-sudo chflags uchg "/Library/Managed Preferences/agiuser/com.google.Chrome.plist"
+sudo chflags uchg "/Library/Managed Preferences/xxx/com.google.Chrome.plist"
 ```
 
 这样一来,连`root`权限也无法直接(可以先解锁再写)写这个文件了,也就是说云枢就没法再往里面写东西了,从而达到了禁止安装浏览器拓展的目的
@@ -79,7 +79,7 @@ sudo killall cfprefsd
 5. 验证是否成功
 
 ```shell
-defaults read "/Library/Managed Preferences/agiuser/com.google.Chrome"
+defaults read "/Library/Managed Preferences/xxx/com.google.Chrome"
 ```
 
 应该为空
