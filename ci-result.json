@@ -1,0 +1,66 @@
+[
+  {
+    "path": "/",
+    "score": 0.95,
+    "performance": 0.88,
+    "accessibility": 0.93,
+    "best-practices": 1,
+    "seo": 1
+  },
+  {
+    "path": "/china-wall",
+    "score": 1,
+    "performance": 0.99,
+    "accessibility": 1,
+    "best-practices": 1,
+    "seo": 1
+  },
+  {
+    "path": "/china-wall/homebrew-install",
+    "score": 1,
+    "performance": 0.99,
+    "accessibility": 1,
+    "best-practices": 1,
+    "seo": 1
+  },
+  {
+    "path": "/china-wall/index",
+    "score": 1,
+    "performance": 0.99,
+    "accessibility": 1,
+    "best-practices": 1,
+    "seo": 1
+  },
+  {
+    "path": "/china-wall/postgres-install",
+    "score": 0.99,
+    "performance": 0.99,
+    "accessibility": 0.96,
+    "best-practices": 1,
+    "seo": 1
+  },
+  {
+    "path": "/china-wall/ubuntu-apt",
+    "score": 1,
+    "performance": 0.99,
+    "accessibility": 1,
+    "best-practices": 1,
+    "seo": 1
+  },
+  {
+    "path": "/mix/index",
+    "score": 1,
+    "performance": 0.99,
+    "accessibility": 1,
+    "best-practices": 1,
+    "seo": 1
+  },
+  {
+    "path": "/mix/yunshu",
+    "score": 0.99,
+    "performance": 0.99,
+    "accessibility": 0.96,
+    "best-practices": 1,
+    "seo": 1
+  }
+]
