@@ -9,6 +9,12 @@ hero:
     - theme: brand
       text: 长城突破
       link: /china-wall
+    - theme: brand
+      text: 杂七杂八
+      link: /mix
+    - theme: brand
+      text: 算法
+      link: /algorithm
 ---
 
 <div align="center" style="margin-top: -50px; margin-bottom: 50px;">
