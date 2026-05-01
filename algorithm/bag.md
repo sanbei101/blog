@@ -97,7 +97,7 @@ def complete_comb(coins, amount):
             dp[j] += dp[j - coin]
     return dp[amount]
 ```
-[518. 零钱兑换 II](https://leetcode.cn/problems/coin-change-2)
+[518. 零钱兑换 II](https://leetcode.cn/problems/coin-change-ii)
 ```py
 class Solution:
     def change(self, amount: int, coins: List[int]) -> int:
