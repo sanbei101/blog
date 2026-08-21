@@ -6,7 +6,7 @@
   },
   "devDependencies": {
     "vitepress": "^2.0.0-alpha.19",
-    "vitepress-sidebar": "^1.38.0"
+    "vitepress-sidebar": "^1.39.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

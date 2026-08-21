@@ -12,8 +12,8 @@ importers:
         specifier: ^2.0.0-alpha.19
         version: 2.0.0-alpha.19(esbuild@0.27.4)(postcss@8.5.25)
       vitepress-sidebar:
-        specifier: ^1.38.0
-        version: 1.38.0
+        specifier: ^1.39.0
+        version: 1.39.0
 
 packages:
 
@@ -833,8 +833,8 @@ packages:
       yaml:
         optional: true
 
-  vitepress-sidebar@1.38.0:
-    resolution: {integrity: sha512-0TojAa2MOIBYRMrssLd1j0exJnUOgD9JWebnBrly7rrOcwt0S8HQo7MXylI0vauzG6N6gSFTNnq5ubChwQvXew==}
+  vitepress-sidebar@1.39.0:
+    resolution: {integrity: sha512-GgHYtvF0ctYODmHv1CpJOMCfvUOvq0RSG+ZfUwvykmBBFpM1sos1YMt6L292UuOGr9UhROspCv8YLNC4H0glZg==}
     engines: {node: '>=20.0.0'}
 
   vitepress@2.0.0-alpha.19:
@@ -1537,7 +1537,7 @@ snapshots:
       esbuild: 0.27.4
       fsevents: 2.3.3
 
-  vitepress-sidebar@1.38.0:
+  vitepress-sidebar@1.39.0:
     dependencies:
       glob: 13.0.6
       gray-matter: 4.0.3
