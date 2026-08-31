@@ -1,0 +1,31 @@
+sections: [hero, cards]
+
+hero:
+  align: center
+  eyebrow: Sanbei blog
+  title_lines:
+    - words: [{ text: 分享技术知识 }]
+    - words: [{ text: 记录学习心得 }]
+  lead: 算法总结、网络受限环境下的开发指南,以及一些杂七杂八的东西。
+  actions:
+    - { label: 长城突破, url: blog/china-wall/, icon: fa-solid fa-shield-halved, style: primary }
+    - { label: 杂七杂八, url: blog/mix/, icon: fa-solid fa-box-archive, style: ghost }
+    - { label: 算法, url: blog/algorithm/, icon: fa-solid fa-code, style: ghost }
+
+cards:
+  eyebrow: 按栏目浏览
+  title: 最近在写什么
+  columns: 3
+  items:
+    - title: 算法
+      desc: 记录一些刷leetcode的算法总结。
+      icon: fa-solid fa-code
+      url: blog/algorithm/
+    - title: 长城突破
+      desc: 网络受限环境下的常用解决办法。
+      icon: fa-solid fa-shield-halved
+      url: blog/china-wall/
+    - title: 杂七杂八
+      desc: 一时间想不到分类的文章放在这里。
+      icon: fa-solid fa-box-archive
+      url: blog/mix/

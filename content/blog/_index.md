@@ -1,6 +1,6 @@
 ---
-title: Blog
-description: Posts, design notes, and release announcements.
+title: 博客
+description: 文章、算法笔记与踩坑记录。
 type: blog
 icon: fa-solid fa-blog
 sidebar_root_for: self
@@ -15,4 +15,4 @@ cascade:
   reading_time: true
 ---
 
-Follow the project through articles, design decisions, and release notes.
+文章、算法笔记与踩坑记录。

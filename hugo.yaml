@@ -1,39 +1,23 @@
 # OINK Starter — the only site configuration file.
-# Change the two marked values first; everything else builds as-is.
 
-title: &siteTitle Project Name # CHANGE ME: one shared title for every language
-baseURL: https://example.org/ # CHANGE ME: canonical production URL
-defaultContentLanguage: en
+title: Sanbei的博客
+baseURL: https://sanbei101.github.io/blog
+defaultContentLanguage: zh
 enableGitInfo: true
 enableRobotsTXT: true
 enableEmoji: true
-timeZone: UTC
+timeZone: Asia/Shanghai
 
 languages:
-  en:
-    label: English
-    locale: en-US
-    weight: 1
-    title: *siteTitle
-    params:
-      description: Documentation, updates, and guides for your project.
   zh:
     label: 简体中文
     locale: zh-CN
-    weight: 2
-    title: *siteTitle
+    weight: 1
+    title: Sanbei的博客
     hasCJKLanguage: true
     params:
-      description: 你的项目文档、动态与指南。
-  fr:
-    label: Français
-    locale: fr-FR
-    weight: 3
-    title: *siteTitle
-    params:
-      description: Documentation, actualités et guides de votre projet.
+      description: 分享技术知识,记录学习心得
 
-# OINK's Markdown components depend on these three Goldmark settings.
 markup:
   goldmark:
     renderer:
@@ -53,7 +37,7 @@ outputs:
 params:
   offline_search: true
   copyright:
-    authors: Project contributors
+    authors: Sanbei
     from_year: 2026
   footer_center_info: ''
   ui:
@@ -72,7 +56,7 @@ params:
     #   reasons: true
 
   # Optional repository links. Uncomment after creating your own repository.
-  # github_repo: https://github.com/OWNER/REPOSITORY
+  # github_repo: https://github.com/sanbei011/YOUR-REPOSITORY
   # github_branch: main
 
   # Optional brand assets. The starter already supplies a neutral logo.
