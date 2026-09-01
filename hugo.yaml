@@ -26,6 +26,9 @@ markup:
   highlight:
     noClasses: false
 
+minify:
+  minifyOutput: true
+
 outputs:
   home: [HTML, RSS, markdown, LLMS]
   page: [HTML, markdown]
@@ -87,4 +90,4 @@ module:
     - path: github.com/pgsty/oink
   hugoVersion:
     extended: true
-    min: 0.160.1
+    min: 0.165.0
