@@ -1,7 +1,4 @@
-# OINK Starter — the only site configuration file.
-
 title: Sanbei的博客
-baseURL: https://sanbei101.github.io/blog
 defaultContentLanguage: zh
 enableGitInfo: true
 enableRobotsTXT: true
