@@ -151,16 +151,48 @@ if err := validate.Struct(req); err != nil {
 
 ## JWT: `cristalhq/jwt` 代替 `golang-jwt/jwt`
 
-JWT 是另一个特别容易被写出"看起来能用"代码的地方。
+`jwt` 是派发用户签名的核心功能,几乎必备这个类型的库
 
-我选择 [cristalhq/jwt](https://github.com/cristalhq/jwt) 的原因,主要是它把 JWT 的几个动作拆得很清楚:
+`golang-jwt/jwt` 是大家用的最广泛的一个 `JWT` 库,他本身也没有什么依赖问题,但是他的 API 对 `Agent` 来说不算特别友好(对我也不友好,刚看文档的时候看了好一会才明白这个回调是在干什么):
+
++ `Claims` 可以直接使用 `MapClaims`,所有字段都变成了 `map[string]any`,类型需要自己断言
++ 解析 Token、验签和校验 Claims 都挤在回调里面,代码风格很丑陋
+
+```go
+token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+    "user_id": userID,
+    "role":    "admin",
+    "exp":     time.Now().Add(24 * time.Hour).Unix(),
+})
+
+raw, err := token.SignedString(secret)
+```
+
+解析时再从 `map[string]any` 里面把字段取出来:
+
+```go
+token, err := jwt.ParseWithClaims(raw, jwt.MapClaims{}, func(token *jwt.Token) (any, error) {
+    return secret, nil
+})
+if err != nil {
+    return err
+}
+
+claims := token.Claims.(jwt.MapClaims)
+userID, ok := claims["user_id"].(string)
+if !ok {
+    return errors.New("invalid user_id")
+}
+```
+
+我选择的替代库是 [cristalhq/jwt](https://github.com/cristalhq/jwt),他把这几个动作拆得很清楚:
 
 1. `Signer` 负责签名
 2. `Verifier` 负责验签
 3. `Builder` 负责构造 Token
-4. `ParseClaims` 负责解析并验证 Token
+4. `ParseClaims` 负责解析并验证签名
 
-这种职责划分对人类比较清楚,对 `Agent` 更加清楚。以 HMAC 为例:
+以 HMAC 为例,我们可以直接把业务中的 Claims 定义成结构体:
 
 ```go
 type UserClaims struct {
@@ -173,7 +205,6 @@ func issueToken(userID, role string, secret []byte) (string, error) {
     if err != nil {
         return "", fmt.Errorf("create jwt signer failed: %w", err)
     }
-
     builder := jwt.NewBuilder(signer)
     token, err := builder.Build(&UserClaims{
         RegisteredClaims: jwt.RegisteredClaims{
@@ -209,48 +240,59 @@ func parseToken(raw string, secret []byte) (UserClaims, error) {
 }
 ```
 
-这里特意写了 `IsValidAt`。验签成功只代表 Token 确实由正确的密钥签出来,不代表它没有过期。这个判断不能因为库的 API 看起来很简单就省掉,安全边界上的代码,还是需要人类确认。
+我觉得这个库做得最好的地方就是:他没有把所有事情都塞进一个万能的 `Token` 里,而是把签名和验签拆开了。`Agent` 看到 `NewVerifierHS(jwt.HS256, secret)` 就知道这里固定使用 `HS256` 和这个密钥验签,再也不用写丑陋的 `func(token *jwt.Token) (any, error)` 的回调啦
 
-### 顺便拉踩一下 `golang-jwt/jwt`
-
-古法使用 `golang-jwt/jwt` 时,经常会把 Claims 写成一个 `MapClaims`:
-
-```go
-token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-    "user_id": userID,
-    "role":    "admin",
-    "exp":     time.Now().Add(24 * time.Hour).Unix(),
-})
-
-raw, err := token.SignedString(secret)
-```
-
-解析时再从 `map[string]any` 里面把字段取出来:
-
-```go
-token, err := jwt.Parse(raw, func(token *jwt.Token) (any, error) {
-    return secret, nil
-})
-```
-
-这段代码短得像一句广告,但是它把很多重要的问题藏起来了:
-
-1. `user_id` 解析出来到底是 `string` 还是 `float64`
-2. `role` 不存在时应该怎么办
-3. 回调里有没有检查预期的签名算法
-4. Token 签名有效之后,有没有额外检查过期时间
-
-`Agent` 看到 `MapClaims` 和 `any`,非常容易顺着项目里已有的写法继续复制,最后每个接口都自己断言一遍字段类型。字段越多,漏校验的概率越大。
-
-`cristalhq/jwt` 也不是说用了就自动安全,但它鼓励你把 Claims 定义成结构体,把签名算法固定在 `NewVerifierHS(jwt.HS256, secret)` 里。代码更长了一点,但是关键决策更容易被看见,这就是我更喜欢它的原因。
+又学到了一个好用的库啦!
 
 ## HTTP 路由: `chi` 代替 `gin`
 
 最后是 Web 框架。
 
-我在上一节已经说了,简单的 HTTP 服务直接使用 `net/http` 就行。如果项目的路由开始变多,需要路由分组、中间件、子路由,我会优先考虑 [chi](https://github.com/go-chi/chi),而不是直接上 `gin`。
+`gin` 是大家使用非常广泛的 Web 框架,他的路由、中间件、参数绑定、JSON 返回值都给你封装好了,用起来确实很爽,但是他也有一些缺点:
 
-`chi` 的核心特点是:它本身几乎就是 `net/http` 的增强版。
++ 依赖实在太多,一个 HTTP 框架的 `go.mod` 里面出现了 `mongo-driver`、`quic-go`、`protobuf` 这种和普通 HTTP 路由关系不大的依赖
++ 自带了参数绑定、JSON 序列化、表单处理等一大堆功能,为了省几行代码,把很多自己的抽象和依赖带进了项目
++ 使用 `gin.Context` 贯穿整个请求生命周期,Handler、中间件、参数绑定、返回 JSON 全部是 Gin 自己的 API,和标准库的 `http.Handler` 不是一套东西
+
+```
+require (
+    github.com/bytedance/sonic
+    github.com/go-playground/validator/v10
+    github.com/goccy/go-json
+    github.com/goccy/go-yaml
+    github.com/json-iterator/go
+    github.com/quic-go/quic-go
+    go.mongodb.org/mongo-driver/v2
+    google.golang.org/protobuf
+)
+```
+
+这个依赖数量对于一个 Web 框架来说确实有点夸张了,而且很多功能其实我并不需要。比如我只是想注册两个 HTTP 路由,结果还要顺便把各种 JSON、YAML、校验器、QUIC、MongoDB 相关的代码带进来。
+
+再看一下 Gin 的日常用法:
+
+```go
+router := gin.Default()
+
+router.POST("/users", func(ctx *gin.Context) {
+    var req CreateUserRequest
+    if err := ctx.ShouldBindJSON(&req); err != nil {
+        ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+        return
+    }
+    ctx.JSON(http.StatusOK, gin.H{"name": req.Name})
+})
+```
+
+看起来非常爽,但是这里从头到尾都是 Gin 自己的世界:
+
++ 路由器是 `*gin.Engine`
++ 处理器参数是 `*gin.Context`
++ 参数绑定使用 `ShouldBindJSON`
++ 返回 JSON 使用 `ctx.JSON`
++ 中间件也需要适配 `gin.HandlerFunc`
+
+我选择的替代库是 [chi](https://github.com/go-chi/chi),他的核心特点就是:他本身几乎就是 `net/http` 的增强版,而且没有额外的第三方依赖。
 
 ```go
 router := chi.NewRouter()
@@ -273,35 +315,9 @@ Handler 仍然是标准库的样子:
 ```go
 func getUser(w http.ResponseWriter, r *http.Request) {
     userID := chi.URLParam(r, "id")
-    w.Write([]byte("user: " + userID))
+    response := map[string]string{"user_id": userID}
+    json.NewEncoder(w).Encode(response)
 }
 ```
 
-没有新的上下文类型,没有新的响应对象,没有必须学习的框架生命周期。`chi.Router` 自己就是一个 `http.Handler`,所以 `Agent` 在项目里搜索 `http.Handler`、`http.HandlerFunc`、`ServeHTTP` 就能顺着调用链走下去。
-
-### 顺便拉踩一下 `gin`
-
-`gin` 的写法当然更加像"全家桶":
-
-```go
-router := gin.Default()
-
-router.GET("/users/:id", func(ctx *gin.Context) {
-    userID := ctx.Param("id")
-    ctx.JSON(http.StatusOK, gin.H{"user_id": userID})
-})
-```
-
-看起来非常爽,但是这里从头到尾都是 Gin 自己的世界:
-
-1. 路由器是 `*gin.Engine`
-2. 处理器参数是 `*gin.Context`
-3. 路径参数使用 `:id`
-4. 返回 JSON 使用 `ctx.JSON`
-5. 中间件也需要适配 `gin.HandlerFunc`
-
-只要 `Agent` 没有完全掌握 Gin 的约定,它就可能在某个地方混入一个标准的 `http.Handler`,或者把 `r.Context()` 和 `gin.Context` 搞混。人类看一眼可能知道应该怎么接,但 Agent 就会开始满项目搜索相关用法。
-
-而 `chi` 的拉踩点在于它几乎没有自己的方言:
-
-路由只有 `chi` 的部分,业务处理仍然是标准库。对 `Agent` 来说,这就像给它铺了一条直路:需要路由能力时调用 `chi`,需要写响应时调用 `net/http` 和 `encoding/json`,不需要在脑子里同时维护一套完全不同的 Web 编程语言。
+`chi` 的中间件也是标准库的 `func(http.Handler) http.Handler`,路由器自己还是一个 `http.Handler`,所以原本的标准库代码可以直接拿过来用。
