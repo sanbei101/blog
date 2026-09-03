@@ -1,0 +1,307 @@
+---
+title: 选几个优质的第三方库
+description: 无依赖库能让 Agent 少走一点弯路
+weight: 20
+---
+
+上一节一直在强调标准库,搞得好像第三方库都是洪水猛兽一样。
+
+> 当然不是。
+
+标准库能解决大部分问题,但是并不代表所有问题都值得我们自己实现。比如日志、参数校验、JWT 这些功能,标准库要么没有,要么需要自己补很多代码。这个时候找一个成熟、简单、无依赖的第三方库,反而比我们自己手搓一份更加靠谱。
+
+我这里说的"无依赖",指的是这个库本身不再依赖一大串其他第三方库,而不是说项目的 `go.mod` 里面从此一个 `require` 都没有。
+
+我目前比较喜欢下面几个库:
+
+1. `phuslu/log`,代替 `zap`、`slog`
+2. `go-argus`,代替 `validator`
+3. `cristalhq/jwt`,代替 `golang-jwt/jwt`
+4. `chi`,代替 `gin`
+
+它们的共同特点是:API 比较直白,核心代码比较容易读,而且不会为了实现一个小功能把整个生态搬进项目里。
+
+## 日志: `phuslu/log` 代替 `zap`、`slog`
+
+先说日志。
+
+`log`、`slog`、`zap`、`zerolog` 这些名字我相信大家都听说过。它们都能打印日志,都能输出 JSON,也都能传一些结构化字段。
+那么为什么我会选择 [`phuslu/log`](https://github.com/phuslu/log) 呢?
+
+大家可以先去看看这个库的中文 `README` (英文README很正经): [phuslu/log 中文 README](https://github.com/phuslu/log/blob/master/README_zh.md), 我觉得写的很好, 在此再做一些例子的说明
+
+1. **无依赖**
+
+让我们先看看最出名的日志库`zap`的 [`go.mod`](https://github.com/uber-go/zap/blob/master/go.mod)
+
+```
+require (
+	github.com/stretchr/testify v1.12.1 <- 为了方便测试引入了一个assert库,还算能理解,但我感觉 t.Fatalf 也很好用
+	go.uber.org/goleak v1.3.0 <- 也是一个测试库,用于检测 goroutine 泄漏,可使用标准库中 synctest 替代
+	go.uber.org/multierr v1.10.0 <- err 聚合,可以使用标准库中 errors.Join 替代
+	go.yaml.in/yaml/v3 v3.0.5 <- 纯纯不理解,为什么打个日志还要引入一个yaml解析库,我自己要想做配置自己会搞呀,你越界了!
+)
+```
+
+当我们只是想要打个日志,我们会惊奇的发现,竟然引入了 `4` 个没有其他作用的间接依赖,有些是为了兼容老版本还没有跟进`go`的最新特性,有些是为了满足个别用户的小众需求
+
+这还不止,为了要让日志文件自动轮转,还需要引入额外的库 (而`phuslu/log`什么都不需要)
+
+这也就是为什么上一节为什么说要尽可能挑那些字依赖少的库了,不仅会让我们的`go.mod`变得很臃肿,也会让打包的二进制文件变大,还会让`Agent`增加理解负担
+
+2. **语法简单,开箱即用**
+
+```go
+func main() {
+    userID := 1001
+    err := errors.New("this is an error")
+    log.Info().
+        Int("user_id", userID).
+        Str("action", "create").
+        Msg("user created")
+    log.Error().
+        Err(err).
+        Int("user_id", userID).
+        Msg("create user failed")
+}
+```
+每个字段的类型都直接写在了方法名上,`Int` 就是整数,`Str` 就是字符串,`Bool` 就是布尔值, `Err` 就是错误, 语法十分的精炼
+
+我个人还觉得有一点做得很好: 默认即最优,也不用去创建一个`logger`对象,这也就是说,不管是`handler`,`service`,我们不需要也不推荐在参数中加入一个`logger *logger.Logger`,
+直接使用全局的就好了 (一个日志还传来传去干啥,难道日志在不同的方法还会有配置变化的需求吗?)
+
+ps: 这个库也是主播少有的在关键能力上用第三方库替换标准库的选择:
+
+标准库`slog`虽然在`go`官方几经优化之后已经好了不少,但是他还是缺乏类型,文件写入等功能
+
+```go
+这种键值对的方式总感觉没有上面的链式要来的直观,而且也缺少了类型
+slog.Info("user created", "user_id", userID, "action", "create")
+```
+
+## 参数校验: `go-argus` 代替 `validator`
+
+参数校验往往是 `http` 请求体进入服务端的第一步,非常的关键,如果没有这个,一些乱七八糟的用户输入就会进入服务端,在业务层就需要做很多 `fallback` 处理(这也是很多 ai最喜欢做的,会平添很多的无用代码,下章再细讲),更有甚一些非法值会触发致命的 `panic` 崩溃,所以这里一定要做好拦截
+
+```
+type CreateUserRequest struct {
+    Name  string `json:"name" validate:"required,min=2,max=50"`
+    Email string `json:"email" validate:"required,email"`
+    Age   int    `json:"age" validate:"gte=0,lte=150"`
+}
+```
+
+`go-playground/validator` 是大家用的最广泛的一个参数校验库,但他也有一些缺点:
+
++ 有些无关依赖,上文已经对日志库的无关依赖做出了点评,大家可以使用ai分析一下这个库又有哪些无关的依赖
+
++ 对校验错误返回的 message 支持的不好,还需要引入一个翻译器,写出来的代码丑丑的,大致如下:
+
+```go
+validate := validator.New()
+uni := ut.New(translator, translator)
+trans, _ := uni.GetTranslator("zh")
+
+if err := validate.Struct(req); err != nil {
+    validationErrors := err.(validator.ValidationErrors)
+    for _, fieldErr := range validationErrors {
+        message := fieldErr.Translate(trans)
+        fmt.Println(message)
+    }
+}
+```
+
+我选择的替代库是 [go-argus](https://github.com/kamalyes/go-argus) 个人认为可能是因为这个名字不怎么直观没多少人知道他,建议作者可以改个名字
+
+```go
+import validator "github.com/kamalyes/go-argus"
+
+var validate = validator.New()
+
+func validateCreateUserRequest(req CreateUserRequest) error {
+    return validate.Struct(req)
+}
+```
+
+它还提供了很多常用规则,包括 `required`、`email`、`uuid`、`ip`、`url`、`datetime` 等。对字符串单值校验时,还可以使用 `VarString`:
+
+```go
+if err := validate.VarString(email, "required,email"); err != nil {
+    return fmt.Errorf("invalid email: %w", err)
+}
+```
+
+这个接口不需要把字符串先装进 `any` 再走反射,对于大量简单字段校验来说会更直接。
+
+`go-argus` 自带多语言翻译,可以直接把校验结果转成结构化消息:
+
+```go
+if err := validate.Struct(req); err != nil {
+    messages := validator.TranslateValidationErrors(err, "zh")
+    for _, message := range messages {
+        log.Info().
+            Str("field", message.Field).
+            Str("message", message.Message).
+            Msg("request validation failed")
+    }
+}
+```
+
+对 `Agent` 来说,这条链路非常清楚:结构体标签定义规则,`Struct` 执行规则,`TranslateValidationErrors` 负责展示, 又学到了一个好用的库啦!
+
+## JWT: `cristalhq/jwt` 代替 `golang-jwt/jwt`
+
+JWT 是另一个特别容易被写出"看起来能用"代码的地方。
+
+我选择 [cristalhq/jwt](https://github.com/cristalhq/jwt) 的原因,主要是它把 JWT 的几个动作拆得很清楚:
+
+1. `Signer` 负责签名
+2. `Verifier` 负责验签
+3. `Builder` 负责构造 Token
+4. `ParseClaims` 负责解析并验证 Token
+
+这种职责划分对人类比较清楚,对 `Agent` 更加清楚。以 HMAC 为例:
+
+```go
+type UserClaims struct {
+    jwt.RegisteredClaims
+    Role string `json:"role"`
+}
+
+func issueToken(userID, role string, secret []byte) (string, error) {
+    signer, err := jwt.NewSignerHS(jwt.HS256, secret)
+    if err != nil {
+        return "", fmt.Errorf("create jwt signer failed: %w", err)
+    }
+
+    builder := jwt.NewBuilder(signer)
+    token, err := builder.Build(&UserClaims{
+        RegisteredClaims: jwt.RegisteredClaims{
+            Subject:   userID,
+            ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+        },
+        Role: role,
+    })
+    if err != nil {
+        return "", fmt.Errorf("build jwt failed: %w", err)
+    }
+    return token.String(), nil
+}
+```
+
+解析的时候,验签和解析 Claims 也摆在明面上:
+
+```go
+func parseToken(raw string, secret []byte) (UserClaims, error) {
+    verifier, err := jwt.NewVerifierHS(jwt.HS256, secret)
+    if err != nil {
+        return UserClaims{}, fmt.Errorf("create jwt verifier failed: %w", err)
+    }
+
+    var claims UserClaims
+    if err := jwt.ParseClaims([]byte(raw), verifier, &claims); err != nil {
+        return UserClaims{}, fmt.Errorf("parse jwt failed: %w", err)
+    }
+    if !claims.IsValidAt(time.Now()) {
+        return UserClaims{}, errors.New("jwt is expired or not active")
+    }
+    return claims, nil
+}
+```
+
+这里特意写了 `IsValidAt`。验签成功只代表 Token 确实由正确的密钥签出来,不代表它没有过期。这个判断不能因为库的 API 看起来很简单就省掉,安全边界上的代码,还是需要人类确认。
+
+### 顺便拉踩一下 `golang-jwt/jwt`
+
+古法使用 `golang-jwt/jwt` 时,经常会把 Claims 写成一个 `MapClaims`:
+
+```go
+token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+    "user_id": userID,
+    "role":    "admin",
+    "exp":     time.Now().Add(24 * time.Hour).Unix(),
+})
+
+raw, err := token.SignedString(secret)
+```
+
+解析时再从 `map[string]any` 里面把字段取出来:
+
+```go
+token, err := jwt.Parse(raw, func(token *jwt.Token) (any, error) {
+    return secret, nil
+})
+```
+
+这段代码短得像一句广告,但是它把很多重要的问题藏起来了:
+
+1. `user_id` 解析出来到底是 `string` 还是 `float64`
+2. `role` 不存在时应该怎么办
+3. 回调里有没有检查预期的签名算法
+4. Token 签名有效之后,有没有额外检查过期时间
+
+`Agent` 看到 `MapClaims` 和 `any`,非常容易顺着项目里已有的写法继续复制,最后每个接口都自己断言一遍字段类型。字段越多,漏校验的概率越大。
+
+`cristalhq/jwt` 也不是说用了就自动安全,但它鼓励你把 Claims 定义成结构体,把签名算法固定在 `NewVerifierHS(jwt.HS256, secret)` 里。代码更长了一点,但是关键决策更容易被看见,这就是我更喜欢它的原因。
+
+## HTTP 路由: `chi` 代替 `gin`
+
+最后是 Web 框架。
+
+我在上一节已经说了,简单的 HTTP 服务直接使用 `net/http` 就行。如果项目的路由开始变多,需要路由分组、中间件、子路由,我会优先考虑 [chi](https://github.com/go-chi/chi),而不是直接上 `gin`。
+
+`chi` 的核心特点是:它本身几乎就是 `net/http` 的增强版。
+
+```go
+router := chi.NewRouter()
+router.Use(middleware.RequestID)
+router.Use(middleware.Recoverer)
+
+router.Route("/users", func(router chi.Router) {
+    router.Get("/{id}", getUser)
+    router.Post("/", createUser)
+})
+
+server := &http.Server{
+    Addr:    ":8080",
+    Handler: router,
+}
+```
+
+Handler 仍然是标准库的样子:
+
+```go
+func getUser(w http.ResponseWriter, r *http.Request) {
+    userID := chi.URLParam(r, "id")
+    w.Write([]byte("user: " + userID))
+}
+```
+
+没有新的上下文类型,没有新的响应对象,没有必须学习的框架生命周期。`chi.Router` 自己就是一个 `http.Handler`,所以 `Agent` 在项目里搜索 `http.Handler`、`http.HandlerFunc`、`ServeHTTP` 就能顺着调用链走下去。
+
+### 顺便拉踩一下 `gin`
+
+`gin` 的写法当然更加像"全家桶":
+
+```go
+router := gin.Default()
+
+router.GET("/users/:id", func(ctx *gin.Context) {
+    userID := ctx.Param("id")
+    ctx.JSON(http.StatusOK, gin.H{"user_id": userID})
+})
+```
+
+看起来非常爽,但是这里从头到尾都是 Gin 自己的世界:
+
+1. 路由器是 `*gin.Engine`
+2. 处理器参数是 `*gin.Context`
+3. 路径参数使用 `:id`
+4. 返回 JSON 使用 `ctx.JSON`
+5. 中间件也需要适配 `gin.HandlerFunc`
+
+只要 `Agent` 没有完全掌握 Gin 的约定,它就可能在某个地方混入一个标准的 `http.Handler`,或者把 `r.Context()` 和 `gin.Context` 搞混。人类看一眼可能知道应该怎么接,但 Agent 就会开始满项目搜索相关用法。
+
+而 `chi` 的拉踩点在于它几乎没有自己的方言:
+
+路由只有 `chi` 的部分,业务处理仍然是标准库。对 `Agent` 来说,这就像给它铺了一条直路:需要路由能力时调用 `chi`,需要写响应时调用 `net/http` 和 `encoding/json`,不需要在脑子里同时维护一套完全不同的 Web 编程语言。
