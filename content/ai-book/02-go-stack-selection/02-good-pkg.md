@@ -316,8 +316,40 @@ Handler 仍然是标准库的样子:
 func getUser(w http.ResponseWriter, r *http.Request) {
     userID := chi.URLParam(r, "id")
     response := map[string]string{"user_id": userID}
-    json.NewEncoder(w).Encode(response)
+    # 使用上节提到的高性能 render 函数
+    render.Success(w, http.StatusOK, "success", response)
 }
 ```
 
 `chi` 的中间件也是标准库的 `func(http.Handler) http.Handler`,路由器自己还是一个 `http.Handler`,所以原本的标准库代码可以直接拿过来用。
+
+这件事在需要优化性能时尤其重要。上一节我们自己写的 `render` 包,接收的就是标准库的 `http.ResponseWriter` 和 `*http.Request`,所以可以直接放进 `chi` 的 Handler 里:
+
+```go
+import validator "github.com/kamalyes/go-argus"
+
+var validate = validator.New()
+
+func createUser(w http.ResponseWriter, r *http.Request) {
+    req, err := render.ReadBody[CreateUserRequest](w, r, false)
+    if err != nil {
+        return
+    }
+    if err := validate.Struct(req); err != nil {
+        render.Error(w, http.StatusBadRequest, "请求参数校验失败")
+        return
+    }
+
+    render.Success(w, http.StatusCreated, "创建成功", map[string]string{
+        "name": req.Name,
+    })
+}
+```
+
+这里没有使用 `chi` 自己的请求上下文,也没有使用框架自带的绑定和 JSON 返回:
+
+1. 请求体由 `render.ReadBody` 统一读取,底层可以使用上一节介绍的 `encoding/json/v2`,热点接口还可以换成手写的高性能编解码。
+2. 参数校验由 `kamalyes/go-argus` 执行,因此可以把 Gin 默认绑定链路里的 `go-playground/validator` 替换掉,同时继续复用结构体标签和多语言错误消息。
+3. 响应由 `render.Success` 和 `render.Error` 统一写出,普通接口和高 QPS 接口都可以共用同一套 Handler 形状。
+
+所以 `chi` 的价值不只是少几个依赖,而是把路由交给框架,把请求读取、参数校验、响应渲染这些关键环节留给我们自己选择。这样上一节手写的高性能 `render` 和这一节的 `go-argus` 才能自然地组合在一条标准库风格的请求链路中。
