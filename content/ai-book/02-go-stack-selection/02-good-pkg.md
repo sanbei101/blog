@@ -4,7 +4,7 @@ description: 无依赖库能让 Agent 少走一点弯路
 weight: 20
 ---
 
-上一节一直在强调标准库,搞得好像第三方库都是洪水猛兽一样。
+上一节一直在强调标准库,搞得好像第三方库都是洪水猛兽一样
 
 > 当然不是。
 
@@ -14,10 +14,10 @@ weight: 20
 
 我目前比较喜欢下面几个库:
 
-1. `phuslu/log`,代替 `zap`、`slog`
-2. `go-argus`,代替 `validator`
-3. `cristalhq/jwt`,代替 `golang-jwt/jwt`
-4. `chi`,代替 `gin`
+1. `phuslu/log`代替 `zap`、`slog`
+2. `go-argus`代替 `validator`
+3. `cristalhq/jwt`代替 `golang-jwt/jwt`
+4. `chi`代替 `gin`
 
 它们的共同特点是:API 比较直白,核心代码比较容易读,而且不会为了实现一个小功能把整个生态搬进项目里。
 
@@ -81,9 +81,9 @@ slog.Info("user created", "user_id", userID, "action", "create")
 
 ## 参数校验: `go-argus` 代替 `validator`
 
-参数校验往往是 `http` 请求体进入服务端的第一步,非常的关键,如果没有这个,一些乱七八糟的用户输入就会进入服务端,在业务层就需要做很多 `fallback` 处理(这也是很多 ai最喜欢做的,会平添很多的无用代码,下章再细讲),更有甚一些非法值会触发致命的 `panic` 崩溃,所以这里一定要做好拦截
+参数校验往往是 `http` 请求体进入服务端的第一步,非常的关键,如果没有这个,一些乱七八糟的用户输入就会进入服务端,在业务层就需要做很多 `fallback` 处理(这也是很多 `AI` 最喜欢做的,会平添很多的无用代码,下章再细讲),更有甚一些非法值会触发致命的 `panic` 崩溃,所以这里一定要做好拦截
 
-```
+```go
 type CreateUserRequest struct {
     Name  string `json:"name" validate:"required,min=2,max=50"`
     Email string `json:"email" validate:"required,email"`
@@ -145,6 +145,40 @@ if err := validate.Struct(req); err != nil {
             Msg("request validation failed")
     }
 }
+```
+
+可以完美的和我们之前的`render`包进行适配:
+
+```go
+func ReadBody[T any](w http.ResponseWriter, r *http.Request) (T, error) {
+	var body T
+	if r.ContentLength == 0 {
+		return body, nil
+	}
+	if err := json.UnmarshalRead(r.Body, &body); err != nil {
+		if optional && errors.Is(err, io.EOF) {
+			return body, nil
+		}
+		log.Error().Err(err).Msg("Failed to read/decode request body")
+		Error(w, http.StatusBadRequest, "JSON 格式非法")
+		return body, err
+	}
+	if err := validate.Struct(body); err != nil {
+		errs := validator.TranslateValidationErrors(err, "zh")
+		errorMsgs := make([]string, 0, len(errs))
+		for i := range errs {
+			errorMsgs = append(errorMsgs, errs[i].Field+": "+errs[i].Message)
+		}
+		fullErrorMsg := strings.Join(errorMsgs, "; ")
+		Error(w, http.StatusBadRequest, fullErrorMsg)
+		return body, err
+	}
+	return body, nil
+}
+```
+这样一来,我们就在反序列化前端传递的 `request` 时顺便进行了错误处理,并且能返回给前端极其清晰的 `err message`:
+```go
+邮箱格式非法; 年龄不能大于150
 ```
 
 对 `Agent` 来说,这条链路非常清楚:结构体标签定义规则,`Struct` 执行规则,`TranslateValidationErrors` 负责展示, 又学到了一个好用的库啦!
@@ -273,7 +307,6 @@ require (
 
 ```go
 router := gin.Default()
-
 router.POST("/users", func(ctx *gin.Context) {
     var req CreateUserRequest
     if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -296,14 +329,10 @@ router.POST("/users", func(ctx *gin.Context) {
 
 ```go
 router := chi.NewRouter()
-router.Use(middleware.RequestID)
-router.Use(middleware.Recoverer)
-
 router.Route("/users", func(router chi.Router) {
     router.Get("/{id}", getUser)
     router.Post("/", createUser)
 })
-
 server := &http.Server{
     Addr:    ":8080",
     Handler: router,
@@ -331,7 +360,7 @@ import validator "github.com/kamalyes/go-argus"
 var validate = validator.New()
 
 func createUser(w http.ResponseWriter, r *http.Request) {
-    req, err := render.ReadBody[CreateUserRequest](w, r, false)
+    req, err := render.ReadBody[CreateUserRequest](w, r)
     if err != nil {
         return
     }
@@ -339,17 +368,10 @@ func createUser(w http.ResponseWriter, r *http.Request) {
         render.Error(w, http.StatusBadRequest, "请求参数校验失败")
         return
     }
-
     render.Success(w, http.StatusCreated, "创建成功", map[string]string{
         "name": req.Name,
     })
 }
 ```
 
-这里没有使用 `chi` 自己的请求上下文,也没有使用框架自带的绑定和 JSON 返回:
-
-1. 请求体由 `render.ReadBody` 统一读取,底层可以使用上一节介绍的 `encoding/json/v2`,热点接口还可以换成手写的高性能编解码。
-2. 参数校验由 `kamalyes/go-argus` 执行,因此可以把 Gin 默认绑定链路里的 `go-playground/validator` 替换掉,同时继续复用结构体标签和多语言错误消息。
-3. 响应由 `render.Success` 和 `render.Error` 统一写出,普通接口和高 QPS 接口都可以共用同一套 Handler 形状。
-
-所以 `chi` 的价值不只是少几个依赖,而是把路由交给框架,把请求读取、参数校验、响应渲染这些关键环节留给我们自己选择。这样上一节手写的高性能 `render` 和这一节的 `go-argus` 才能自然地组合在一条标准库风格的请求链路中。
+由此看来 0 依赖的 `chi` 包既能让我们享受到框架库的便携性,也能在关键性能处插入我们基于最新`go`版本的高性能实现,更关键的是`Agent`看到的是没有任何黑魔法的函数性编程,开发排错能力upup!

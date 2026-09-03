@@ -123,9 +123,9 @@ func writeJSON[T any](w http.ResponseWriter, code int, response T) {
 		log.Error().Err(err).Msg("Failed to write response")
 	}
 }
-func ReadBody[T any](w http.ResponseWriter, r *http.Request, optional bool) (T, error) {
+func ReadBody[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 	var body T
-	if optional && r.ContentLength == 0 {
+	if r.ContentLength == 0 {
 		return body, nil
 	}
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
