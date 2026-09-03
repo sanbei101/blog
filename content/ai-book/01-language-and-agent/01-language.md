@@ -14,6 +14,24 @@ weight: 10
 
 这里点名批评`java`,写个简单的接口,往往要拖家带口塞进 `Controller`、`Service`、`ServiceImpl`、`Mapper`、`DTO`、`VO` 这些类中,以及一大堆 `@Autowired`、`@Transactional` 等黑盒注解,这种代码在非ai时代可能还能说在大规模协作中能保持规范(其实古法编程也不愿意去写这么啰嗦的代码)
 
+```
+src/main/java/com/example/user/
+├── controller/
+│   └── UserController.java              // 接收请求,调用 service
+├── dto/
+│   └── UpdateNicknameRequestDTO.java    // 参数校验注解一大堆
+├── service/
+│   ├── UserService.java                 // 接口:只写了一行方法定义
+│   └── impl/
+│       └── UserServiceImpl.java         // 实现类:做 DTO -> Entity 转换
+├── mapper/
+│   └── UserMapper.java                  // 数据库操作接口
+├── entity/
+│   └── UserDO.java                      // 对应数据库表的实体类
+└── vo/
+    └── UserResponseVO.java              // 返回给前端的包装对象
+```
+
 但是在ai时代,就是上下文毒药,大量的上下文被无意义的模板占据,要写一个接口,从`handler...repo`,连古法编程都需要在`ide`中点来点去不胜其烦,而且文件夹嵌套严重,动辄7,8层,导致ai阅读代码库,需要调用大量的`grep`,`read`工具理解冗长的处理链路,很快上下文就被塞的满满当当,带来了更高的费用和更低的智商
 
 本人习惯只分为`handler`,`service`两层,ai只需要拿`gopls mcp`进行`1`次`GO to definition`就可以跳转到处理链路,或者拿`grep`搜索一下函数名就能进行对应,ai写新逻辑的时候也不用到处新建文件,这也带来了一个好处: 如果让ai在多个文件输出过多的token,那么到尾端他的犯错几率会大幅增加(本人的经验,还不太清楚原理),相反如果让ai专注的去撰写一个函数的实现,那么他的思考链将更专注于这个函数的性能优化,往往就能写出可读性,可维护性更好的代码
