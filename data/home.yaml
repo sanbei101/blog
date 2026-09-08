@@ -2,30 +2,34 @@ sections: [hero, cards]
 
 hero:
   align: center
-  eyebrow: Sanbei blog
+  eyebrow: AI 使用经验
   title_lines:
-    - words: [{ text: 分享技术知识 }]
-    - words: [{ text: 记录学习心得 }]
-  lead: 算法总结、网络受限环境下的开发指南,以及一些杂七杂八的东西。
+    - words: [{ text: Golang 实习生 }]
+    - words: [{ text: Vibe Coding 的经验随笔}]
   actions:
-    - { label: 长城突破, url: blog/china-wall/, icon: fa-solid fa-shield-halved, style: primary }
-    - { label: 杂七杂八, url: blog/mix/, icon: fa-solid fa-box-archive, style: ghost }
-    - { label: 算法, url: blog/algorithm/, icon: fa-solid fa-code, style: ghost }
+    - { label: 语言和 Agent, url: ai-book/01-language-and-agent/, icon: fa-solid fa-robot, style: primary }
+    - { label: 技术栈推荐, url: ai-book/02-stack-selection/, icon: fa-solid fa-layer-group, style: ghost }
+    - { label: 工具和约束, url: ai-book/03-tools-and-constraints/, icon: fa-solid fa-gears, style: ghost }
+    - { label: 迭代与测试, url: ai-book/04-iter-and-test/, icon: fa-solid fa-rotate, style: ghost }
 
 cards:
-  eyebrow: 按栏目浏览
-  title: 最近在写什么
-  columns: 3
+  eyebrow: 按章节浏览
+  title: 讲了些什么
+  columns: 2
   items:
-    - title: 算法
-      desc: 记录一些刷leetcode的算法总结。
-      icon: fa-solid fa-code
-      url: blog/algorithm/
-    - title: 长城突破
-      desc: 网络受限环境下的常用解决办法。
-      icon: fa-solid fa-shield-halved
-      url: blog/china-wall/
-    - title: 杂七杂八
-      desc: 一时间想不到分类的文章放在这里。
-      icon: fa-solid fa-box-archive
-      url: blog/mix/
+    - title: 语言和 Agent
+      desc: 为什么在 AI 时代依然首选 Go,以及怎么配置出你最舒服的 Agent。
+      icon: fa-solid fa-robot
+      url: ai-book/01-language-and-agent/
+    - title: Go 技术栈选型
+      desc: 我的 Go 项目常用库和选型原则。
+      icon: fa-solid fa-layer-group
+      url: ai-book/02-stack-selection/
+    - title: 工具和约束
+      desc: 给 AI 装上工具,给 AI 缚上缰绳。
+      icon: fa-solid fa-gears
+      url: ai-book/03-tools-and-constraints/
+    - title: 迭代与测试
+      desc: 快速迭代,快速验证。
+      icon: fa-solid fa-rotate
+      url: ai-book/04-iter-and-test/
