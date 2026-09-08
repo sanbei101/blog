@@ -1,47 +1,15 @@
-# Sanbei的博客
+# Sanbei 的博客
 
-基于 [OINK](https://oink.pgsty.com/) + Hugo 的个人博客,仅简体中文。
+目前的 AI Coding 时代,靠人力**古法编程**的需求是越来越少了,本人从2025年开始进入 Golang 开发的实习岗位,25下半年的时候我遇到的公司的开发流程基本上是 人工写 20-30% 的代码: 例如`interface.go`,`schema.sql`等关键地方的决策依靠人工完成, 剩下的`service`,`repository`层就依赖`AI`搭配`GORM`等`ORM`框架快速编写增删改查的逻辑,然后`review`这个流程基本上还依靠我的`mentor`进行`古法校对`,当时的`BOSS直聘`上面的岗位描述还是`后端开发`,`服务端开发`等
 
-## 栏目
+但是到了 2026 年,这一切似乎都不一样了,`AI`的智商似乎呈现指数型爆炸增长,从刚开年的`Deepseek R1`到后续越来越强的`Claude Opus 4.5, 4.7, 4.8, 5.0`,他们的进化速度远超想象, 随手就能完成以前 资深前端 挠破脑袋才能写出来的炫酷界面, 随便写出千行逻辑完整,风格规范的服务端代码, `Boss直聘`上面的岗位描述也变成了`AI 软件开发`, `AI Agent`开发, 笔试开始出现`vibe codeing`的环节, 我经历的面试 全部问到了 "你平时使用什么ai工具`, "能介绍一下你平时的ai工作流程?" 这类问题
 
-```text
-content/blog/
-├── algorithm/    算法:刷leetcode的算法总结
-├── china-wall/   长城突破:网络受限环境下的解决办法
-└── mix/          杂七杂八:暂时没有分类的文章
-```
+> 大部分岗位的描述字里行间都是一句话: "用AI快速的完成你的工作"
 
-首页文案在 `data/home.yaml`,站点配置(标题、域名、评论、统计)在 `hugo.yaml`。
+## 楔子
 
-## 写作
+本人突发奇想, 面试官这么喜欢问我平时的`AI 工作流`, 但是纯口述却总是无法很好的表达我的经验, 那么是不是可以写一本书来说明这一切, 捋一遍我自己的知识库的同时, 还能直接把链接分享给面试官来说明我的ai经验
 
-新建 `content/blog/<栏目>/<文章名>.md`:
+当前有许多的博客也分享他们的ai经验,但私以为他们的分享大多不够具体,可能就是介绍一下哪个 `skills/mcp` 好用,或者缺乏真实的运用案例,所以我希望不说宏观的话,能把 ai的运用在 代码项目/片段 中进行说明,尽可能让你身临其境,就像在看番茄小说
 
-```markdown
----
-title: 文章标题
-description: 一句话摘要
-date: 2026-09-01
----
-
-正文……
-```
-
-## 本地预览
-
-```bash
-hugo server
-```
-
-首次运行会下载 OINK Hugo Module,需要 Git、Go 1.27+ 和 Hugo Extended 0.165+。
-
-## 发布
-
-正式构建:
-
-```bash
-hugo --cleanDestinationDir --gc --minify --environment production \
-  --printPathWarnings --panicOnWarning
-```
-
-部署走 `.github/workflows/` 下的 GitHub Pages 或 Cloudflare Pages 工作流。注意先把 `hugo.yaml` 里的 `baseURL` 改成正式地址。
+由于本人的技术栈为 `golang`+ 任意前端框架(我觉得都大差不差), 所以本文的案例都将以`golang` + `typescript` 为主, 可能涉及到一些语言特有的特性和最佳实践,技术栈为`python`,`java`等的读者可以取其精华去其糟粕
