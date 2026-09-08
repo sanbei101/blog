@@ -78,7 +78,6 @@ err := db.Raw(`
     ORDER BY total_amount DESC
     LIMIT 10
 `, thirtyDaysAgo, tenantID, "active", minTotalAmount).Scan(&stats).Error
-
 ```
 
 当你敲下 `db.Raw()` 的那一刻,**ORM 最后的遮羞布就被扯掉了**。
@@ -93,6 +92,61 @@ err := db.Raw(`
 
 这就是 [sqlc](https://sqlc.dev/)。
 
+还是上面那个统计需求,在 `sqlc` 的世界里,你要做的事情只有一个:把 `db.Raw()` 里那条 SQL 原封不动地搬进 `query.sql`,再给它起个名字(前提自然是 `schema.sql` 里有 `users`、`orders` 的建表语句,顺带一提,`amount` 建议用 `float8` 而不是 `numeric`,不然生成的是 `pgtype.Numeric`,取值还要多转一层,想想都累):
+
+```sql
+-- name: GetUserOrderStats :many
+SELECT
+    u.id AS user_id,
+    u.username,
+    COALESCE(SUM(o.amount), 0) AS total_amount,
+    COALESCE(AVG(o.amount), 0) AS avg_amount
+FROM users u
+LEFT JOIN orders o ON o.user_id = u.id AND o.created_at >= sqlc.arg('thirty_days_ago')
+WHERE u.tenant_id = sqlc.arg('tenant_id') AND u.status = sqlc.arg('status')
+GROUP BY u.id, u.username
+HAVING SUM(o.amount) > sqlc.arg('min_total_amount')
+ORDER BY total_amount DESC
+LIMIT 10;
+```
+
+敲下 `sqlc generate`,手写的 `UserStat`、手拼的 `Select` 字符串、链式调用地狱全部蒸发,换来两个干干净净的结构体:
+
+```go
+type GetUserOrderStatsParams struct {
+    ThirtyDaysAgo  pgtype.Timestamptz `json:"thirty_days_ago"`
+    TenantID       string             `json:"tenant_id"`
+    Status         string             `json:"status"`
+    MinTotalAmount float64            `json:"min_total_amount"`
+}
+
+type GetUserOrderStatsRow struct {
+    UserID      int64   `json:"user_id"`
+    Username    string  `json:"username"`
+    TotalAmount float64 `json:"total_amount"`
+    AvgAmount   float64 `json:"avg_amount"`
+}
+```
+
+service 层的调用也极其朴素:
+
+```go
+rows, err := s.q.GetUserOrderStats(ctx, db.GetUserOrderStatsParams{
+    ThirtyDaysAgo:  pgtype.Timestamptz{Time: thirtyDaysAgo, Valid: true},
+    TenantID:       tenantID,
+    Status:         "active",
+    MinTotalAmount: minTotalAmount,
+})
+```
+
+对照前面的三个痛点,每一个都被精准击毙:
+
++ **重构安全性直接拉满**:`orders.amount` 改名叫 `orders.total_price` 的瞬间,`sqlc generate` 拿着 `schema.sql` 一验,当场红字爆炸,报错精确到行列,重命名再也没有漏网之鱼。
++ **`Scan` 静默填充 Bug 物理免疫**:`GetUserOrderStatsRow` 的每个字段都是生成器按查询结果的列精确产出的,别名写什么它就生成什么,列和字段的对应关系想错都没有机会错。
++ **告别数问号**:`$1..$4` 和位置参数被收编成一个具名 `struct`,字段名就是文档,`thirtyDaysAgo` 到底传给谁一目了然。
+
+说白了,你在 `db.Raw()` 里写的那条 SQL,就是 `sqlc` 需要你写的全部内容——区别只是它替你把 `Scan`、类型映射、参数封装这些体力活全部包圆,并且顺手给 `SQL` 上了编译期保险。
+
 ---
 
 ## `sqlc` 的设计哲学: `SQL` 是第一公民
@@ -101,8 +155,8 @@ err := db.Raw(`
 
 你不用去学那些稀奇古怪的链式方法,也不用给 Go 结构体打几十个复杂的 Tag。你的工作流只有三步:
 
-1. 写好你的数据库 DDL 建表语句(`schema.sql`)。
-2. 写好你的业务 SQL(`query.sql`)。
+1. 写好你的数据库 `DDL` 建表语句(`schema.sql`)。
+2. 写好你的业务 SQL (`query.sql`(可分为多个文件防止挤在一起))。
 3. 终端敲一行命令:`sqlc generate`。
 
 `sqlc` 会在本地直接调用真实的数据库 AST 解析器,把你的 SQL 解析完,自动生成**纯标准库/纯 pgx、无反射、强类型**的 Go 代码。
@@ -150,24 +204,25 @@ CREATE INDEX idx_chunks_tenant ON document_chunks(tenant_id);
 
 ```sql
 -- name: SearchDocumentChunks :many
-SELECT 
+SELECT
     c.id AS chunk_id,
     c.document_id,
     d.title AS document_title,
     c.content,
     c.metadata,
-    1 - (c.embedding <=> $1) AS similarity_score
+    1 - (c.embedding <=> sqlc.arg('embedding')) AS similarity_score
 FROM document_chunks c
 INNER JOIN documents d ON d.id = c.document_id
-WHERE c.tenant_id = $2
+WHERE c.tenant_id = sqlc.arg('tenant_id')
   AND d.status = 'published'
-  AND (1 - (c.embedding <=> $1)) >= $3
+  AND (1 - (c.embedding <=> sqlc.arg('embedding'))) >= sqlc.arg('min_similarity')
 ORDER BY similarity_score DESC
-LIMIT $4;
-
+LIMIT sqlc.arg('result_limit');
 ```
 
 看,这就是所有人一眼就能看懂的纯粹 SQL。
+
+顺带一提,这里顺手把 `$1..$4` 换成了 `sqlc.arg(...)` 具名参数:同一个 `embedding` 在 SQL 里出现两次,生成的结构体里也只有一个 `Embedding` 字段,调用时填一次就行,前面统计查询的快乐在这里再体验一遍。
 
 **3. 配置与生成 (`sqlc.yaml`)**
 
@@ -204,27 +259,27 @@ import (
 )
 
 const searchDocumentChunks = `-- name: SearchDocumentChunks :many
-SELECT 
+SELECT
     c.id AS chunk_id,
     c.document_id,
     d.title AS document_title,
     c.content,
     c.metadata,
-    1 - (c.embedding <=> $1) AS similarity_score
+    1 - (c.embedding <=> sqlc.arg('embedding')) AS similarity_score
 FROM document_chunks c
 INNER JOIN documents d ON d.id = c.document_id
-WHERE c.tenant_id = $2
+WHERE c.tenant_id = sqlc.arg('tenant_id')
   AND d.status = 'published'
-  AND (1 - (c.embedding <=> $1)) >= $3
+  AND (1 - (c.embedding <=> sqlc.arg('embedding'))) >= sqlc.arg('min_similarity')
 ORDER BY similarity_score DESC
-LIMIT $4
+LIMIT sqlc.arg('result_limit')
 `
 
 type SearchDocumentChunksParams struct {
-	Embedding       pgvector.Vector `json:"embedding"`
-	TenantID        string          `json:"tenant_id"`
-	SimilarityScore float64         `json:"similarity_score"`
-	Limit           int32           `json:"limit"`
+	Embedding     pgvector.Vector `json:"embedding"`
+	TenantID      string          `json:"tenant_id"`
+	MinSimilarity float64         `json:"min_similarity"`
+	ResultLimit   int32           `json:"result_limit"`
 }
 
 type SearchDocumentChunksRow struct {
@@ -240,8 +295,8 @@ func (q *Queries) SearchDocumentChunks(ctx context.Context, arg SearchDocumentCh
 	rows, err := q.db.Query(ctx, searchDocumentChunks,
 		arg.Embedding,
 		arg.TenantID,
-		arg.SimilarityScore,
-		arg.Limit,
+		arg.MinSimilarity,
+		arg.ResultLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -307,19 +362,17 @@ query.sql:10:11: operator does not exist: integer = text
 
 它会在编译期就告诉你类型不匹配。
 
-你根本不需要启动本地数据库,更不需要把服务跑起来调一遍接口才能知道 SQL 写没写对。**只要 `sqlc generate` 顺利通过,这句 SQL 在语法和类型上就 100% 是正确的**。
-
 ---
 
 ## 零抽象税:拥抱最快的 `pgx`
 
-在 Go 语言中访问 PostgreSQL,`jackc/pgx` 是毋庸置疑的性能天花板:
+在 Go 语言中访问 `PostgreSQL`,`jackc/pgx` 是性能天花板:
 
-* 它支持 PostgreSQL 原生 Binary 二进制传输格式(比基于文本的 `lib/pq` 快得多,内存占用极低)。
+* 它支持 `PostgreSQL` 原生 `Binary` 二进制传输格式(比基于文本的 `lib/pq` 快得多,内存占用更低)。
 * 内置连接池(`pgxpool`),并发性能极其强悍。
-* 深度支持 Postgres 的高级功能(批量 `CopyFrom`、`Listen`/`Notify`、复合类型等)。
+* 深度支持 `Postgres` 的高级功能(批量 `CopyFrom`、`Listen`/`Notify`、复合类型等)。
 
-如果在 GORM 里面用 pgx,你还得套一个 `gorm.io/driver/postgres` 适配层。GORM 必须为了兼容 MySQL、SQLite 等引擎,把它抹平成通用的 `database/sql` 行为,还要在上面套一层 Hook 和 Plugin 机制。
+如果在 GORM 里面用 `pgx`,你还得套一个 `gorm.io/driver/postgres` 适配层。GORM 必须为了兼容 `MySQL`、`SQLite` 等引擎,把它抹平成通用的 `database/sql` 行为,还要在上面套一层 `Hook` 和 `Plugin` 机制。
 而 `sqlc` 是直接为 `pgx/v5` 生成原生代码的:
 
 ```text
@@ -329,10 +382,10 @@ GORM:
 业务代码 -> GORM API -> 反射分析结构体 -> 构建 AST -> 执行 SQL -> database/sql 驱动桥接 -> pgx -> Postgres
 
 sqlc:
-业务代码 -> 生成的函数 (直接调用 q.db.Query) -> pgx/v5 二进制传输 -> Postgres
+业务代码 -> 生成的函数 -> pgx/v5 二进制传输 -> Postgres
 ```
 
-省掉了中间 5、6 层的抽象开销和对象分配。在高并发接口下,你的 CPU 火焰图干干净净,再也看不到大片由 `reflect.Value.Interface`、`reflect.typedmemmove` 造成的 GC 尖刺。
+省掉了中间 3、4 层的抽象开销和对象分配。在高并发接口下,火焰图更加干净,看不到大片由 `reflect.Value.Interface`、`reflect.typedmemmove` 造成的 GC 尖刺啦。
 
 ---
 
@@ -350,12 +403,6 @@ sqlc:
 
 你只需要在 `sqlc.yaml` 里告诉它,数据库的 `vector` 类型对应哪个 Go 包的哪个结构体:
 
-```yaml
-overrides:
-  - db_type: "vector"
-    go_type: "github.com/pgvector/pgvector-go.Vector"
-```
-
 你就可以在 SQL 里面肆无忌惮地写向量计算、写 CTE、写窗口函数、写复杂的 JSONB 提取表达式 `metadata->>'source'`。生成的 Go 方法自然会接收正确的参数,并返回正确的强类型字段。
 
 数据库出了新功能、新插件,你当天就能直接用上,完全不需要等某个 ORM 框架作者发新版本去"支持"它。
@@ -370,7 +417,7 @@ overrides:
 
 > 大模型写纯 `SQL` 的能力,远超它写某个 `ORM` 框架语法的能力
 
-全人类几十年来沉淀在互联网上的 SQL 代码量,比某个具体 ORM(比如 GORM v2)的代码量多了几个数量级。
+全人类几十年来沉淀在互联网上的 SQL 代码量,比某个具体 `ORM`(比如 GORM)的代码量多了几个数量级。
 
 你让 Agent 用 GORM 写一个复杂的关联更新带条件排查,它经常会产生幻觉:
 
@@ -378,7 +425,7 @@ overrides:
 * 关联预加载(Preload)条件放错了位置
 * 搞不清哪些零值会被忽略更新,必须手动加 `.Select("*")`
 
-但如果你让 Agent 写一段标准 SQL,它甚至能一口气写出性能极佳的 CTE 递归查询。**让 Agent 发挥它最擅长的技能,不要用 ORM 的私有黑魔法去折磨它。**
+但如果你让 Agent 写一段标准 SQL,它甚至能一口气写出性能极佳的 CTE 递归查询。**让 Agent 发挥它最擅长的技能,不要用 ORM 的私有黑魔法去削弱它。**
 
 > 下文极度**节约**,零心智负担
 
@@ -393,7 +440,7 @@ overrides:
 
 > 闭环极短的反馈回路
 
-在 Vibe Coding 模式下,最理想的协作闭环是:**一旦出错,编译器能立刻给出极度精确的错误信息,引导 Agent 秒速自我修复**。
+在 `Vibe Coding` 模式下,最理想的协作闭环是:**一旦出错,编译器能立刻给出极度精确的错误信息,引导 Agent 秒速自我修复**。
 
 当 Agent 在开发一个新功能时:
 
