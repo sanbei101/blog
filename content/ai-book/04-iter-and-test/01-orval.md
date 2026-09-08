@@ -1,7 +1,7 @@
 ---
 title: 接口即文档, 全栈er实践指南
 description: 受够了写API文档? 
-weight: 50
+weight: 10
 ---
 
 在开发中有一些很常见的场景:

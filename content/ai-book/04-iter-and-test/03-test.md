@@ -1,7 +1,7 @@
 ---
-title: 别让 Fake 骗过 AI,Go 全面测试指南
+title: Go 全面测试指南
 description: 无状态逻辑用单测,业务流程用真实环境,并发代码交给 synctest
-weight: 50
+weight: 30
 ---
 
 在 AI 接管大量编码工作以后,开发中最危险的一句话已经变成了:
