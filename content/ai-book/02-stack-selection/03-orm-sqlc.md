@@ -1,299 +1,417 @@
 ---
-title: 用 sqlc 干掉整个 repo 层
-description: sqlc + pgx/v5 + PostgreSQL:没有 any,没有反射,编译期见真章
+title: 用 sqlc 干掉 orm
+description: 没有性能损耗, 没有理解损耗
 weight: 30
 ---
 
-第一章埋了个坑,当时说: 主播在 `go` 里会选一个很厉害的工具 `sqlc`,他完全可以代替整个 `repo` 层,还对 `Agent` 的上下文更友好
+众所周知,`GORM` 是有反射造成的性能损耗的,但是通过手写 SQL 又不安全(字符串拼接容易出注入漏洞、字段改了难以察觉、手写 `Scan` 极其繁琐)。有什么办法既能享受到原生的性能收益,又可以获得 `ORM` 的友好类型呢?
 
-今天来填坑,先上结论,我的数据库组合拳是 **`sqlc` + `pgx/v5` + `PostgreSQL`**:
+第一章埋了个坑,当时说:在 `Go` 里会选一个很厉害的工具 `sqlc`,它完全可以代替整个 `repo` 层,还对 `Agent` 的上下文更友好。
 
-1. 你只负责写 `SQL`,`Scan`、类型映射、方法签名全部在编译期生成好
-2. 生成的代码就是最朴素的 `Go`: 没有 `any`,没有反射,没有 builder 链
-3. 底层 `pgx` 是 `Postgres` 驱动里最快的那一档,而且 `GORM` 官方的 `Postgres` 驱动底下就是它,直接用等于少交一层抽象税
+> 能在编译期解决的问题,绝不留到运行期。
+> 告别反射与抽象税,用纯 SQL 驱动类型安全的 Go 代码。
 
-## ORM 到底碍着 Agent 什么了
+## 为什么我们要把 ORM 换掉?
 
-古法写 `CRUD`,大家最熟悉的组合是 `GORM`,确实很爽:
+在传统的 Go 项目开发里,起手就是一个 `GORM`,写简单的增删改查时是很爽:
 
 ```go
-type User struct {
-    gorm.Model  // 黑魔法全家桶: ID/CreatedAt/UpdatedAt/DeletedAt 偷偷塞给你
-    Name    string
-    Email   string `gorm:"uniqueIndex"`
-    Balance int64
+db.Where("status = ?", "active").Order("created_at desc").Find(&users)
+```
+
+但这种"爽快"是有沉重代价的:
+
+1. **反射造成的性能损耗**:为了把数据库里的二维数据映射到你的结构体上,底层动用了大量的 `reflect`,不停地检查字段类型、做内存开辟和类型断言。
+2. **隐藏在字符串里的暗雷**:你的表结构改了一个字段名,代码里的 `"status = ?"` 还是旧的。编译器根本发现不了,直到线上运行到这行代码才会抛错。
+3. **沉重的抽象税**:ORM 在底层驱动之上包了一层又一层的抽象、中间件、Plugin、Callback。为了兼顾跨数据库的方言,它把底层驱动最极致的特性全都磨平了。
+
+很多同学可能会说:"主播主播,我业务简单,不在乎这几毫秒的损耗,我就图它写着方便不行吗?"
+
+行,那我们来看看当业务变复杂之后会发生什么。
+
+## 逃不掉的宿命:复杂的查询终成 `db.Raw()`
+
+使用 ORM 的团队,无论前期口号喊得多响亮,项目写到后面都会遇到同一个死局:**只要业务逻辑稍微复杂一点,ORM 的链式 API 就会变成灾难**。
+
+假设我们做一个真实的 SaaS 场景:统计某个租户下,近 30 天内每个用户的订单总额、平均客单价,并联表筛选出最近活跃的用户。
+
+在 GORM 里,你为了用它的链式语法,通常得写成这样:
+
+```go
+type UserStat struct {
+    UserID       int64   `gorm:"column:user_id"`
+    Username     string  `gorm:"column:username"`
+    TotalAmount  float64 `gorm:"column:total_amount"`
+    AvgAmount    float64 `gorm:"column:avg_amount"`
 }
 
-db.Where("name = ?", name).First(&user)
-db.Model(&User{ID: id}).Update("balance", gorm.Expr("balance - ?", amount))
-db.Delete(&User{ID: id})
+var stats []UserStat
+err := db.Table("users").
+    Select("users.id as user_id, users.username, COALESCE(SUM(orders.amount), 0) as total_amount, COALESCE(AVG(orders.amount), 0) as avg_amount").
+    Joins("LEFT JOIN orders ON orders.user_id = users.id AND orders.created_at >= ?", thirtyDaysAgo).
+    Where("users.tenant_id = ? AND users.status = ?", tenantID, "active").
+    Group("users.id, users.username").
+    Having("SUM(orders.amount) > ?", minTotalAmount).
+    Order("total_amount DESC").
+    Limit(10).
+    Scan(&stats).Error
 ```
 
-但在 `Agent` 眼里,这段代码处处是坑:
+1. **所有的字段、别名、计算表达式全是在字符串里硬编码拼接**。
+2. **无重构安全性**:如果 `orders.amount` 改名叫 `orders.total_price`,编译器连一个警告都不会给,IDE 也搜不到代码引用。
+3. **ORM 自身的链式调用规则极度反直觉**:比如 `Group` 和 `Select` 里的字段到底该怎么对齐?为什么有时候加了 `Joins` 后分页计算的 `Count` 会算出天文数字?
 
-1. `First(&user)` 的参数类型是 `any`,塞进去的是啥只有运行时反射才知道,塞错了编译器一声不吭,半夜三点线上 `panic`
-2. `Where` 的第一个参数可以是 `string`、`struct`、`map` 甚至子查询,一个函数的参数可以是任何东西,这本身就是最大的 `any`
-3. `gorm.Model` 把软删除偷偷塞了进来: `db.Delete` 只是把 `deleted_at` 填上,之后所有查询都会被自动加上 `WHERE deleted_at IS NULL`,想真删还得念咒 `Unscoped()`,这些隐式行为在调用处一点都看不出来
-4. `Where("emial = ?", email)` 列名拼错了,编译器帮不上一点忙,测试能不能拦住全看运气
-5. 错误藏在 `*gorm.DB` 的 `.Error` 字段里,忘了判断就静默吞掉;最后执行的 SQL 长什么样,要靠 `Debug()` 运行时打印出来才知道
+于是,可能最后会破罐子破摔,直接祭出: **`db.Raw()`**。
 
-更搞笑的是,`GORM` 的 `Postgres` 驱动底层就是 `pgx`。你付出了一整层反射 + builder + 钩子的抽象税,最后买到的还是同一个驱动
-
-> ORM 的本质是用一层运行时黑魔法把 SQL 藏起来,而在 AI 时代,`SQL` 恰恰是 `Agent` 最不需要被藏起来的东西,毕竟它是训练语料中写得最规范的一门语言
-
-## sqlc: SQL 才是唯一真相
-
-`sqlc` 的思路和 ORM 完全反着来: 不是让你用 `Go` 结构体拼出 `SQL`,而是让你直接写 `SQL`,然后反向生成 `Go` 代码
-
-目录就三样东西:
+```go
+err := db.Raw(`
+    SELECT 
+        u.id AS user_id,
+        u.username,
+        COALESCE(SUM(o.amount), 0) AS total_amount,
+        COALESCE(AVG(o.amount), 0) AS avg_amount
+    FROM users u
+    LEFT JOIN orders o ON o.user_id = u.id AND o.created_at >= ?
+    WHERE u.tenant_id = ? AND u.status = ?
+    GROUP BY u.id, u.username
+    HAVING SUM(o.amount) > ?
+    ORDER BY total_amount DESC
+    LIMIT 10
+`, thirtyDaysAgo, tenantID, "active", minTotalAmount).Scan(&stats).Error
 
 ```
-db/
-├── schema.sql    # 建表语句,人工把关的关键决策
-├── query.sql     # 一行注释声明一个函数,正文就是 SQL
-└── sqlc.yaml     # 生成配置
-```
 
-`schema.sql`:
+当你敲下 `db.Raw()` 的那一刻,**ORM 最后的遮羞布就被扯掉了**。
+
+你为了"方便"引入了一个庞大的 ORM,结果面对稍微复杂点的业务查询,你依然在手动写纯 SQL。而且你还吞下了 `db.Raw` 带来的所有缺点:
+
+* **静态检查彻底归零**:SQL 语法写错、问号占位符传少了一个,全得在运行时报错。
+* **静默填充 Bug**:你在 SQL 别名里写了 `user_id`,但结构体 Tag 写错了一个字母成 `gorm:"column:userid"`,GORM 在 `.Scan()` 时**不会报错**,而是悄无声息地给 `UserID` 赋零值 `0`!这种 Bug 线上查起来足以让人崩溃。
+* **白白交税**:你手写了纯 SQL,却依然要在运行时走一遍 GORM 的反射机制来填充结构体,白白浪费 CPU 和内存。
+
+既然复杂查询终究要写 SQL,为什么不换一个思维:**直接以 SQL 为核心,让工具在编译阶段帮我们把所有 Go 代码自动生成好?**
+
+这就是 [sqlc](https://sqlc.dev/)。
+
+---
+
+## `sqlc` 的设计哲学: `SQL` 是第一公民
+
+`sqlc` 的工作逻辑跟传统 ORM 完全反过来: **SQL 是你的源码,Go 代码只是它的编译产物**。
+
+你不用去学那些稀奇古怪的链式方法,也不用给 Go 结构体打几十个复杂的 Tag。你的工作流只有三步:
+
+1. 写好你的数据库 DDL 建表语句(`schema.sql`)。
+2. 写好你的业务 SQL(`query.sql`)。
+3. 终端敲一行命令:`sqlc generate`。
+
+`sqlc` 会在本地直接调用真实的数据库 AST 解析器,把你的 SQL 解析完,自动生成**纯标准库/纯 pgx、无反射、强类型**的 Go 代码。
+
+---
+
+## 实战:一个真实的 AI 知识库检索场景
+
+口说无凭,我们用一个当下最常见的真实业务场景来跑一遍:**带租户隔离、JSONB 元数据过滤、以及向量相似度检索的 AI 知识库切片查询**。
+
+**1. 定义 DDL (`schema.sql`)**
+
+我们在数据库中建两张表,支持 PostgreSQL 的 `uuid`、`jsonb` 以及 `vector` 扩展:
 
 ```sql
-CREATE TABLE users (
-    id         BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name       TEXT NOT NULL,
-    email      TEXT NOT NULL,
-    balance    BIGINT NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE documents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id VARCHAR(64) NOT NULL,
+    title TEXT NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status VARCHAR(32) NOT NULL DEFAULT 'published',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE document_chunks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    tenant_id VARCHAR(64) NOT NULL,
+    content TEXT NOT NULL,
+    embedding vector(1536) NOT NULL,
+    token_count INT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_chunks_embedding ON document_chunks USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX idx_chunks_tenant ON document_chunks(tenant_id);
+
 ```
 
-`query.sql`:
+**2. 写业务 SQL (`query.sql`)**
+
+我们希望做一次 RAG 检索:给入租户 ID、用户的检索向量、相似度阈值以及分页数量,联表查出切片内容、文档标题和计算后的余弦相似度:
 
 ```sql
--- name: GetUser :one
-SELECT * FROM users WHERE id = $1 LIMIT 1;
+-- name: SearchDocumentChunks :many
+SELECT 
+    c.id AS chunk_id,
+    c.document_id,
+    d.title AS document_title,
+    c.content,
+    c.metadata,
+    1 - (c.embedding <=> $1) AS similarity_score
+FROM document_chunks c
+INNER JOIN documents d ON d.id = c.document_id
+WHERE c.tenant_id = $2
+  AND d.status = 'published'
+  AND (1 - (c.embedding <=> $1)) >= $3
+ORDER BY similarity_score DESC
+LIMIT $4;
 
--- name: CreateUser :one
-INSERT INTO users (name, email) VALUES ($1, $2) RETURNING *;
-
--- name: DeductBalance :execrows
-UPDATE users SET balance = balance - $2 WHERE id = $1 AND balance >= $2;
 ```
 
-`sqlc.yaml`:
+看,这就是所有人一眼就能看懂的纯粹 SQL。
+
+**3. 配置与生成 (`sqlc.yaml`)**
 
 ```yaml
 version: "2"
 sql:
   - engine: "postgresql"
-    schema: "db/schema.sql"
-    queries: "db/query.sql"
+    schema: "schema.sql"
+    queries: "query.sql"
     gen:
       go:
         package: "db"
         out: "internal/db"
-        sql_package: "pgx/v5"        # 关键: 用 pgx 而不是 database/sql
-        emit_json_tags: true
-        emit_interface: true         # 生成 Querier 接口,方便 mock
-        emit_pointers_for_null_types: true
+        sql_package: "pgx/v5"
         overrides:
-          - db_type: "timestamptz"
-            go_type: "time.Time"
-          - db_type: "uuid"
-            go_type: "github.com/google/uuid.UUID"
+          - db_type: "vector"
+            go_type:
+              import: "github.com/pgvector/pgvector-go"
+              type: "Vector"
 ```
 
-跑一下 `sqlc generate`,得到:
-
-```
-internal/db/
-├── db.go          # DBTX 抽象 + New + WithTx
-├── models.go      # 每张表一个结构体
-├── querier.go     # 全部方法的 interface
-└── query.sql.go   # 具体实现
-```
-
-`models.go`:
+敲下 `sqlc generate`,看看它给我们吐出了什么代码:
 
 ```go
-type User struct {
-    ID        int64     `json:"id"`
-    Name      string    `json:"name"`
-    Email     string    `json:"email"`
-    Balance   int64     `json:"balance"`
-    CreatedAt time.Time `json:"created_at"`
-}
-```
+// Code generated by sqlc. DO NOT EDIT.
 
-`query.sql.go`:
+package db
 
-```go
-const getUser = `-- name: GetUser :one
-SELECT id, name, email, balance, created_at FROM users
-WHERE id = $1 LIMIT 1
+import (
+	"context"
+	"encoding/json"
+	"github.com/google/uuid"
+	pgvector "github.com/pgvector/pgvector-go"
+)
+
+const searchDocumentChunks = `-- name: SearchDocumentChunks :many
+SELECT 
+    c.id AS chunk_id,
+    c.document_id,
+    d.title AS document_title,
+    c.content,
+    c.metadata,
+    1 - (c.embedding <=> $1) AS similarity_score
+FROM document_chunks c
+INNER JOIN documents d ON d.id = c.document_id
+WHERE c.tenant_id = $2
+  AND d.status = 'published'
+  AND (1 - (c.embedding <=> $1)) >= $3
+ORDER BY similarity_score DESC
+LIMIT $4
 `
 
-func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
-    row := q.db.QueryRow(ctx, getUser, id)
-    var i User
-    err := row.Scan(&i.ID, &i.Name, &i.Email, &i.Balance, &i.CreatedAt)
-    return i, err
+type SearchDocumentChunksParams struct {
+	Embedding       pgvector.Vector `json:"embedding"`
+	TenantID        string          `json:"tenant_id"`
+	SimilarityScore float64         `json:"similarity_score"`
+	Limit           int32           `json:"limit"`
+}
+
+type SearchDocumentChunksRow struct {
+	ChunkID         uuid.UUID       `json:"chunk_id"`
+	DocumentID      uuid.UUID       `json:"document_id"`
+	DocumentTitle   string          `json:"document_title"`
+	Content         string          `json:"content"`
+	Metadata        json.RawMessage `json:"metadata"`
+	SimilarityScore float64         `json:"similarity_score"`
+}
+
+func (q *Queries) SearchDocumentChunks(ctx context.Context, arg SearchDocumentChunksParams) ([]SearchDocumentChunksRow, error) {
+	rows, err := q.db.Query(ctx, searchDocumentChunks,
+		arg.Embedding,
+		arg.TenantID,
+		arg.SimilarityScore,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []SearchDocumentChunksRow
+	for rows.Next() {
+		var i SearchDocumentChunksRow
+		if err := rows.Scan(
+			&i.ChunkID,
+			&i.DocumentID,
+			&i.DocumentTitle,
+			&i.Content,
+			&i.Metadata,
+			&i.SimilarityScore,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 ```
 
-几个细节品一品:
+1. **参数入参是一个干净的结构体** `SearchDocumentChunksParams`,参数类型一清二楚,没有 `any`,没有 `interface{}`。
+2. **返回值是一目了然的行数据结构体** `SearchDocumentChunksRow`。
+3. 赋值是极简的 `rows.Scan(...)`,精确对应每一列的指针取址。**零反射开销!**
+4. 整段代码没有依赖任何第三方奇奇怪怪的包,只有 `pgx/v5` 驱动。
 
-1. `-- name: GetUser :one` 声明函数名和返回形态: `:one` 返回单行,`:many` 返回切片,`:exec` 只执行不返回,`:execrows` 返回影响行数
-2. 参数 `id int64` 和返回的 `User` 里的每个字段类型,都是从 `schema.sql` 的列类型推出来的,不是你手填的
-3. 你写的 `SELECT *` 被展开成了明确的列名列表,之后加列、调列序都不怕
-4. 函数体就是 `QueryRow + Scan`,和第一章古法手写的 repo 一模一样,只不过这回不用你写了。文件头挂着 `Code generated by sqlc. DO NOT EDIT`,人和 `Agent` 都不用假装维护它
+---
 
-业务侧用起来:
+## 静态检查,快速排错
+
+在 ORM 时代,写 SQL 或者拼接条件最痛苦的一点就是:**所有的拼写错误和类型错误,只有在运行时才会爆炸**。
+
+但在 `sqlc` 体系下,`sqlc` 内部直接内嵌了 PostgreSQL 的语法解析器内核。这意味着你的 SQL 享有和 Go 代码一样的**静态类型检查待遇**。
+
+看看下面这些场景:
+
+**1. 场景 1:字段敲错了**
+
+你在 `query.sql` 里面把 `d.title` 手抖打成了 `d.titile`:
+
+```text
+$ sqlc generate
+query.sql:6:5: column "titile" does not exist in table "documents"
+```
+
+它直接给你精确定位到 `query.sql` 第 6 行第 5 列,告诉你这个字段根本不存在。
+
+**2. 场景 2:类型传反了**
+
+表结构里 `c.tenant_id` 是 `VARCHAR(64)`,而你在 SQL 里写了一个 `c.tenant_id = $1`,却在上一句给了个整数比较,或者给 `token_count` 传入了字符串:
+
+```text
+$ sqlc generate
+query.sql:10:11: operator does not exist: integer = text
+```
+
+它会在编译期就告诉你类型不匹配。
+
+你根本不需要启动本地数据库,更不需要把服务跑起来调一遍接口才能知道 SQL 写没写对。**只要 `sqlc generate` 顺利通过,这句 SQL 在语法和类型上就 100% 是正确的**。
+
+---
+
+## 零抽象税:拥抱最快的 `pgx`
+
+在 Go 语言中访问 PostgreSQL,`jackc/pgx` 是毋庸置疑的性能天花板:
+
+* 它支持 PostgreSQL 原生 Binary 二进制传输格式(比基于文本的 `lib/pq` 快得多,内存占用极低)。
+* 内置连接池(`pgxpool`),并发性能极其强悍。
+* 深度支持 Postgres 的高级功能(批量 `CopyFrom`、`Listen`/`Notify`、复合类型等)。
+
+如果在 GORM 里面用 pgx,你还得套一个 `gorm.io/driver/postgres` 适配层。GORM 必须为了兼容 MySQL、SQLite 等引擎,把它抹平成通用的 `database/sql` 行为,还要在上面套一层 Hook 和 Plugin 机制。
+而 `sqlc` 是直接为 `pgx/v5` 生成原生代码的:
+
+```text
+调用链对比:
+
+GORM:
+业务代码 -> GORM API -> 反射分析结构体 -> 构建 AST -> 执行 SQL -> database/sql 驱动桥接 -> pgx -> Postgres
+
+sqlc:
+业务代码 -> 生成的函数 (直接调用 q.db.Query) -> pgx/v5 二进制传输 -> Postgres
+```
+
+省掉了中间 5、6 层的抽象开销和对象分配。在高并发接口下,你的 CPU 火焰图干干净净,再也看不到大片由 `reflect.Value.Interface`、`reflect.typedmemmove` 造成的 GC 尖刺。
+
+---
+
+## 拓展支持更好
+
+现在大家做 AI 开发、Agent 架构,向量检索(`pgvector`)、全文检索(`tsvector`)、地理信息(`PostGIS`)是家常便饭。
+
+在传统的 ORM 里面搞这些简直是受罪:
+
+* ORM 根本不认识 `<=>`(余弦距离)或者 `<->`(L2 距离)这种操作符。
+* 向量的 `[]float32` 在模型结构体里映射异常别扭,你得实现 `sql.Scanner` 和 `driver.Valuer` 接口,甚至还要处理空值。
+* 如果想要用 Postgres 的复杂特性,比如 CTE(公共表表达式)、窗口函数 `ROW_NUMBER() OVER (...)`,ORM 的链式语法直接歇菜,逼得你只能去写前面批判过的 `db.Raw()`。
+
+而在 `sqlc` 面前,这套问题压根不存在:**因为只要 PostgreSQL 本身支持的语法,`sqlc` 就全部支持**。
+
+你只需要在 `sqlc.yaml` 里告诉它,数据库的 `vector` 类型对应哪个 Go 包的哪个结构体:
+
+```yaml
+overrides:
+  - db_type: "vector"
+    go_type: "github.com/pgvector/pgvector-go.Vector"
+```
+
+你就可以在 SQL 里面肆无忌惮地写向量计算、写 CTE、写窗口函数、写复杂的 JSONB 提取表达式 `metadata->>'source'`。生成的 Go 方法自然会接收正确的参数,并返回正确的强类型字段。
+
+数据库出了新功能、新插件,你当天就能直接用上,完全不需要等某个 ORM 框架作者发新版本去"支持"它。
+
+---
+
+## 与 `Vibe Coding` 完美契合 
+
+到了现在这个时代,我们写代码的方式已经变成了 **Vibe Coding** -- 我们负责梳理业务与设计,Agent 负责写实现。
+
+选型库的时候,必须考虑一个至关重要的问题:**大模型到底最擅长什么?**
+
+> 大模型写纯 `SQL` 的能力,远超它写某个 `ORM` 框架语法的能力
+
+全人类几十年来沉淀在互联网上的 SQL 代码量,比某个具体 ORM(比如 GORM v2)的代码量多了几个数量级。
+
+你让 Agent 用 GORM 写一个复杂的关联更新带条件排查,它经常会产生幻觉:
+
+* 字段名写错
+* 关联预加载(Preload)条件放错了位置
+* 搞不清哪些零值会被忽略更新,必须手动加 `.Select("*")`
+
+但如果你让 Agent 写一段标准 SQL,它甚至能一口气写出性能极佳的 CTE 递归查询。**让 Agent 发挥它最擅长的技能,不要用 ORM 的私有黑魔法去折磨它。**
+
+> 下文极度**节约**,零心智负担
+
+当 Agent 接手一个基于 `sqlc` 的项目时,它怎么理解你的数据层?
+
+它不需要把几千行的 Go 模型、`Hooks`、`Plugin` 全部读进 Context 里。它只需要阅读两个文件:
+
+1. `schema.sql`:清楚地知道数据库有哪些表、字段、外键、约束。
+2. `query.sql`:清楚地知道系统对外提供了哪些数据读写能力。
+
+这就够了!没有隐藏在结构体标签里的生命周期回调,没有深层嵌套的实体映射。整个数据层对 Agent 来说就像白纸一样透明。
+
+> 闭环极短的反馈回路
+
+在 Vibe Coding 模式下,最理想的协作闭环是:**一旦出错,编译器能立刻给出极度精确的错误信息,引导 Agent 秒速自我修复**。
+
+当 Agent 在开发一个新功能时:
+
+1. 它在 `query.sql` 加上一段新业务 SQL。
+2. 运行 `sqlc generate`。
+3. 如果 SQL 里的列名写错了,或者表之间关联条件不匹配,`sqlc` 会直接喷出像 `query.sql:12:4: column "user_name" does not exist` 这样精确到行列的报错。
+4. Agent 拿到这个错误,根本不需要人去介入,1 秒钟就能自动改好。
+5. 生成出来的 `Queries` 接口(`Querier`)本身就是天然的依赖注入接口:
 
 ```go
-pool, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
-if err != nil {
-    return fmt.Errorf("connect postgres failed: %w", err)
-}
-q := db.New(pool)
-
-user, err := q.GetUser(ctx, 1001)
-```
-
-签名 `(ctx, id int64) (User, error)`,没有 `any`,没有 `map[string]interface{}`,`Agent` 靠函数签名就能 100% 正确调用
-
-## 编译期见真章,运行时无惊喜
-
-sqlc 是拿着 `schema.sql` 先把 SQL 解析一遍再生成的,所以 `query.sql` 里手滑写了个 `emial`:
-
-```sql
--- name: GetUser :one
-SELECT * FROM users WHERE emial = $1 LIMIT 1;
-```
-
-`sqlc generate` 当场就给你报出来:
-
-```
-query.sql:2:8: column "emial" does not exist
-```
-
-这一步相当于给 SQL 上了一道编译期检查,错误轮不到线上 QPS 起来之后才爆发
-
-改表结构也是同理: 把 `email` 列改名为 `mail`,重新 `generate` 之后 `models.go` 里 `Email` 变成 `Mail`,`go build` 一把:
-
-```
-service/user.go:23:12: i.Email undefined (type db.User has no field or method Email)
-```
-
-所有调用点一次列全,改完即收工。换成 `GORM` 是什么体验呢? `AutoMigrate` 偷偷把新列加上,老代码查出来的 `Email` 是零值,数据静默丢失,编译器全程装死
-
-> ORM 的错误是运行时惊喜,sqlc 的错误是编译期任务清单
-
-可空字段也处理得很直接,配置里开了 `emit_pointers_for_null_types` 之后,`nickname TEXT`(可以为 NULL)生成出来就是:
-
-```go
-Nickname *string
-```
-
-`nil` 就是没填,`Agent` 一眼即懂,不用去学 `pgtype.Text` 的 `.Valid`/`.String` 那套协议。当然 `pgtype` 本身也不错,看你口味,`overrides` 一行就能换
-
-## 事务: 和第一章无缝衔接
-
-第一章手写过 `BeginTx` 的例子,当时 repo 层还得自己提供 `CreateWithTx(ctx, tx, order)` 这种方法。现在 repo 层是生成的,事务怎么插进去? sqlc 在 `db.go` 里直接白送:
-
-```go
-func New(db DBTX) *Queries {
-    return &Queries{db: db}
-}
-
-// 白送的事务切换器
-func (q *Queries) WithTx(tx pgx.Tx) *Queries {
-    return &Queries{db: tx}
+type Querier interface {
+	SearchDocumentChunks(ctx context.Context, arg SearchDocumentChunksParams) ([]SearchDocumentChunksRow, error)
+	// 其他方法...
 }
 ```
 
-于是第一章那段"所见即所得"的事务代码,一行都不用改风格就能接上:
+Agent 在编写 `Service` 层的业务代码时,直接面向这个接口编程,单元测试时 mock 起来也是毫无阻力。
 
-```go
-func (s *OrderService) CreateOrder(ctx context.Context, order Order) error {
-    tx, err := s.pool.Begin(ctx)
-    if err != nil {
-        return fmt.Errorf("begin tx failed: %w", err)
-    }
-    defer tx.Rollback(ctx)
+---
 
-    q := s.queries.WithTx(tx)
-
-    if _, err := q.CreateOrder(ctx, order.UserID, order.Amount); err != nil {
-        return fmt.Errorf("create order failed: %w", err)
-    }
-    count, err := q.DeductBalance(ctx, order.UserID, order.Amount)
-    if err != nil {
-        return fmt.Errorf("deduct balance failed: %w", err)
-    }
-    if count == 0 {
-        return ErrInsufficientBalance
-    }
-    return tx.Commit(ctx)
-}
-```
-
-注意 `DeductBalance` 用的是 `:execrows`,影响行数为 0 就代表余额不够但 SQL 本身没报错,这种业务语义一个 `if count == 0` 就表达完了,不需要 `gorm.Expr` 和运行时反射的花活
-
-## 快是有原因的
-
-1. `pgx` 原生讲 `Postgres` 的二进制协议,`int8`、`timestamptz` 这些类型直接按二进制编解码,不用先转成字符串再让服务端解析一遍
-2. 生成代码里没有反射,`Scan` 的目标类型是编译期确定的;而 ORM 每次查询都要运行时读 tag、拼 SQL、现场组装 Scanner
-3. `pgxpool` 连接池开箱即用,`CopyFrom` 批量灌数据、`pgx.Batch` 把一批查询攒一波一次发车(sqlc 还有配套的 `:batchexec` 注解),极限性能的逃生门永远开着
-4. `sqlc` 本体只是个编译期的 CLI,跑完 generate 就功成身退,运行时依赖只有 `pgx/v5` 一个
-
-各路 benchmark 里这套组合基本都在第一梯队,而且不是险胜。道理也很朴素: sqlc 生成的就是手写 `pgx` 的样子,所以上限就是 `pgx` 的上限
-
-## Agent 的自检回路
-
-用上一节的选型清单过一遍:
-
-1. 传递依赖: 运行时只有 `pgx/v5` 一个
-2. 核心行为几分钟读懂: 生成代码就是 `QueryRow + Scan`,没有任何隐式调度
-3. 出错能不能从调用处看出原因: SQL 全文以常量形式贴在函数上方,报错直接对着 SQL 看
-4. `Agent` 能不能根据函数签名正确使用: 全是具体类型,没有 `any`
-
-更舒服的是,`Agent` 有一条完整的自检回路。比如你说"给用户列表加一个最近 7 天活跃的筛选":
-
-```
-Agent: 打开 db/query/user.sql
-     -> 追加 -- name: ListRecentlyActive :many
-     -> sqlc generate
-     -> go build
-     -> 通过,收工
-```
-
-SQL 语义对不对,`schema` 会审它;类型对不对,编译器会审它。`Agent` 写错了根本不用等你 review,第二轮自己就能修好
-
-第一章还吐槽过 repo 层会长满 `findByName/findById/findByIdAndStatusAndNotDeleted` 这种只写不删的屎山。在 sqlc 里,所有查询都摊在 `query.sql` 一个文件里,`grep` 一下函数名全在眼前,谁没用了当场处刑,想重构就是改一条 SQL 重新 generate
-
-书的开头提过,现在公司的协作模式是人工把关 `schema.sql` 这种关键决策。而 sqlc 恰好把人和 AI 的分工切在了最舒服的位置: **人写 schema、review SQL 的意图,AI 写 query、跑 generate、补 service 调用**。AI 最强的两门语言是 `SQL` 和 `Go`,sqlc 让这两个能力严丝合缝地对上了
-
-## 也说点公道话
-
-动态拼条件(前端甩过来 8 个可选筛选框)是 sqlc 的弱项。不过大部分场景可以用可空参数糊过去:
-
-```sql
--- name: SearchUsers :many
-SELECT * FROM users
-WHERE
-    (name = sqlc.narg('name') OR sqlc.narg('name') IS NULL)
-    AND (age >= sqlc.narg('min_age') OR sqlc.narg('min_age') IS NULL)
-ORDER BY id;
-```
-
-生成的签名是 `SearchUsers(ctx, name *string, minAge *int32) ([]User, error)`,传 `nil` 就等于没这个条件。真要万箭齐发的动态 SQL,就直接手写 `pgx`,反正连接池你已经有了,不要为了 5% 的场景请回一整个 ORM
-
-## 心动了就试试
-
-```bash
-go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
-```
-
-generate 一次,把生成代码提交进仓库,`CI` 和生产构建不需要装任何额外的东西
-
-`sqlc` 是主播 `go` 技术栈里最没有心理负担的一个选型,又学到了一个好用的库啦!
+不用在 ORM 的泥潭里与反射和 `db.Raw` 搏斗了,让 SQL 回归 SQL,让 Go 回归 Go。
