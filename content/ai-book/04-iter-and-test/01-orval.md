@@ -174,7 +174,7 @@ export function useGetPostsPostId<TData, TError = RenderErrorResponse>(...) { ..
 
 又比如, 后端的鉴权会返回两个 `token` (一个 `access_token`, 一个 `refresh_token`), 这个业务模式需要我们使用`拦截器`进行统一的保存,轮转处理
 
-所有个性化逻辑——`baseURL`、鉴权、响应拆包——收口到 `src/mutator.ts` 一个文件:
+所有个性化逻辑--`baseURL`、鉴权、响应拆包--收口到 `src/mutator.ts` 一个文件:
 
 ```typescript
 // src/mutator.ts
@@ -238,7 +238,7 @@ function clearSession() {
 
 async function refreshAccessToken() {
   const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-  if (!refreshToken) throw new ApiError("登录已过期，请重新登录", 401);
+  if (!refreshToken) throw new ApiError("登录已过期,请重新登录", 401);
 
   const auth = await postAuthRefresh({ refresh_token: refreshToken });
   if (!auth.access_token) throw new ApiError("登录凭证刷新失败", 401);
@@ -250,7 +250,7 @@ async function refreshAccessToken() {
 
 async function retryAfterRefresh(config: RetriableRequestConfig) {
   if (config._retriedAfterRefresh || isUnauthenticatedAuthEndpoint(config.url)) {
-    throw new ApiError("登录已过期，请重新登录", 401);
+    throw new ApiError("登录已过期,请重新登录", 401);
   }
   try {
     refreshPromise ??= refreshAccessToken().finally(() => {
@@ -262,7 +262,7 @@ async function retryAfterRefresh(config: RetriableRequestConfig) {
     return AXIOS_INSTANCE(config);
   } catch {
     clearSession();
-    throw new ApiError("登录已过期，请重新登录", 401);
+    throw new ApiError("登录已过期,请重新登录", 401);
   }
 }
 
