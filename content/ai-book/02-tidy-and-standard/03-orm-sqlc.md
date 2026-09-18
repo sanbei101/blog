@@ -151,7 +151,7 @@ rows, err := s.q.GetUserOrderStats(ctx, db.GetUserOrderStatsParams{
 2. 维护业务 SQL 语句文件(`query.sql`,可按业务模块拆分);
 3. 执行命令行工具:`sqlc generate`。
 
-`sqlc` 在本地直接调用真实的数据库 AST 解析器,把 SQL 解析完成,自动生成基于 `pgx/v5` 或标准库的**零反射、强类型** Go 代码。
+`sqlc` 在本地直接调用真实的数据库 AST 解析器,把 SQL 解析完成,自动生成基于 `pgx/v5` 的强类型 Go 代码。生成的业务层结果映射是显式的,不需要 ORM 那种运行时结构体反射。
 
 ---
 
@@ -316,7 +316,7 @@ func (q *Queries) SearchDocumentChunks(ctx context.Context, arg SearchDocumentCh
 
 其结构特点十分直观:
 1. 入参和出参均为明确的强类型结构体;
-2. 赋值通过 `rows.Scan` 精准对应目标指针,无运行时反射开销;
+2. 赋值通过 `rows.Scan` 精准对应目标指针,业务层不需要运行时结构体反射映射;
 3. 只依赖原生的 `pgx/v5` 驱动。
 
 ---
@@ -365,6 +365,37 @@ sqlc 方案:
 ```
 
 减少了中间抽象层与对象分配,使性能分析火焰图保持整洁,减少由反射映射引起的 GC 停顿。
+
+---
+
+## 基准差异
+
+
+### 测试条件
+
+* 数据库: Docker `postgres:18`
+* 数据集: `users` 表 100,000 行,100 个租户,复合索引为 `(tenant_id, status, id)`;
+* 查询:按 `tenant_id` 和 `status` 过滤,按 `id` 排序,每次返回 100 行;
+* 客户端:Go `1.27.1`,`sqlc` `1.31.1`,CPU 为 `Intel Core Ultra 5 225H`;
+* 连接:两边都设置最大连接数和空闲连接数为 16,数据库与基准程序运行在同一台机器;
+* 统计:预热后执行 `-benchtime=1s -count=10 -benchmem`,用 `benchstat` 汇总。
+
+两边最终执行的 SQL 等价,并且都命中同一个索引计划:
+
+```text
+Limit
+  -> Index Scan using users_tenant_status_id_idx on users
+       Index Cond: ((tenant_id = 42) AND (status = 'active'))
+```
+
+### 测试结果
+
+| 方案 | 单次耗时 | 内存分配 | 分配次数 |
+| --- | ---: | ---: | ---: |
+| `sqlc + pgx/v5` | `78.12µs/op` | `33.11KiB/op` | `318 allocs/op` |
+| GORM | `160.4µs/op` | `43.43KiB/op` | `1,080 allocs/op` |
+
+在这条查询上,`GORM` 的单次耗时约为 `sqlc + pgx/v5` 的 2.05 倍,内存分配多 31%,分配次数多 3.40 倍。数据库执行计划相同,所以这组差异主要来自 `GORM` 的 SQL 构造、`database/sql` 适配层以及结果集到结构体的运行时映射。
 
 ---
 
