@@ -1,7 +1,7 @@
 ---
 title: gopls MCP:Go 工程的编译期语义感知
 description: 基于 LSP 与 AST 消除文本检索幻觉与上下文冗余
-weight: 20
+weight: 10
 ---
 
 在工程实践中,当给 Agent 分配一个代码重构任务时:

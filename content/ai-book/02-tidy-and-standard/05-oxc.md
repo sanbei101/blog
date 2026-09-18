@@ -1,7 +1,7 @@
 ---
 title: Oxc 工具链:前端代码质量与工程门禁
 description: 基于 Rust 工具链构建极速静态分析与格式化闭环
-weight: 40
+weight: 50
 ---
 
 本节介绍基于 Rust 开发的新一代前端工程工具链 [`Oxc`](https://oxc.rs),涵盖以下核心组件:

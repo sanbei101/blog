@@ -1,7 +1,7 @@
 ---
 title: golangci-lint:基于静态分析的代码规范约束
 description: 用 AST 与 SSA 检查器构建确定性质量门禁
-weight: 30
+weight: 40
 ---
 
 在日常工程中,当给 Agent 分配一个后端业务任务时:
