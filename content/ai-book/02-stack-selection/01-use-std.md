@@ -1,55 +1,44 @@
 ---
-title: 能用标准库就别引入依赖
-description: 我的 Go 技术栈选型原则
+title: 优先使用标准库的工程考量
+description: 控制第三方传递依赖，降低代码理解与上下文维护成本
 weight: 10
 ---
 
-`Go`的标准库很强大, 90%的场景都可以直接使用标准库写出完备优质的代码
+在 Go 语言中，标准库的设计完备度非常高，多数基础服务端场景均可直接基于标准库构建。
 
-> 能用标准库就用标准库。
-> 标准库实现起来较为麻烦,能用无依赖的库就用无依赖的库。
+在结合模型开发代码时，选型原则通常遵循两条：
+1. 能用标准库实现的功能，优先使用标准库；
+2. 标准库缺少开箱即用支持的功能，优先选择零传递依赖、接口透明的三方库。
 
-## 为什么要使用标准库?
+## 1. 为什么控制依赖层级？
 
-这不是因为我对第三方库有什么偏见,也不是觉得自己写的代码一定比别人写的库更好。主要是因为现在写代码的人不只有我,还有一个每天都要阅读这些代码的 `Agent`。
+引入第三方库的显性成本是引入依赖，而隐性成本是代码的认知与维护负担。
 
-## 依赖越多,Agent 越容易迷路
-
-古法编程的时候,引入一个库的成本主要是下载一下,然后照着文档调用。只要这个库足够稳定,大家一般不会太关心它背后又依赖了什么。
-
-但到了 AI Coding 时代,事情稍微变得有些不一样。
-
-当我让 `Agent` 接手一个项目时,它不仅要理解我的业务代码,还要理解项目里面引入的各种框架、插件和中间件。一个看起来只有几行的函数,背后可能套着一整个生态:
+当模型接手一个工程时，除了业务逻辑本身，还必须理解框架内部的调度顺序、插件生命周期与上下文包装：
 
 ```text
 handler
-  -> service
-    -> orm
-      -> plugin
-        -> callback
-          -> magic
+  └── service
+        └── orm
+              └── plugin
+                    └── callback
+                          └── runtime magic
 ```
 
-人类程序员可能已经用惯了这套东西,知道某个配置放在哪里,知道某个方法什么时候会被调用。但 `Agent` 不一定知道。
+在调用链路深且隐式约定较多的框架中，模型如果缺少特定版本的先验知识，通常只能采取两种策略：
+1. 依据常见语法猜测调用方式，容易在隐式回调与默认配置上出现偏差；
+2. 反复调用检索工具读取框架内部源码或文档，大量消耗会话上下文。
 
-它遇到不熟悉的库,通常只有两种选择:
+因此，在评估第三方库时，我通常重点关注五个指标：
+* 目标功能是否能由现代 Go 标准库直接实现；
+* 该库是否引入了大量无关的间接依赖；
+* 核心调用链能否在几分钟内通过函数签名直接理清；
+* 出错时能否直接从返回值中定位原因；
+* 模型是否仅依据函数签名即可准确调用。
 
-1. 在当前上下文里猜一个看起来合理的用法
-2. 调用 `grep`、读取源码、搜索文档,把上下文继续吃掉
+## 2. HTTP 路由：优先 `net/http`
 
-猜错了,代码就会出问题。继续检索,上下文和时间就会开始燃烧。
-
-所以我现在选择库的时候,除了看功能是否满足,还会额外看几个东西:
-
-1. 这个功能标准库能不能完成
-2. 这个库有没有传递依赖
-3. 核心行为是不是能在几分钟内读懂
-4. 出错时能不能直接从调用处看出原因
-5. `Agent` 能不能根据函数签名和少量示例正确使用它
-
-## HTTP: 先用 `net/http`
-
-`Go`内置了一套很好用的
+从 Go 1.22 开始，标准库的 `http.ServeMux` 已经支持了基于方法名与路径参数的路由匹配：
 
 ```go
 mux := http.NewServeMux()
@@ -65,41 +54,46 @@ server := &http.Server{
 }
 ```
 
-这段代码没有任何隐藏的路由注册,也没有额外的上下文对象。`Agent` 从上到下读一遍,就能知道请求从哪里进来,路径参数从哪里取出来,最后交给谁处理。
+这段代码没有隐式的全局状态与重度封装的上下文。执行流程从网络请求进入、提取路径参数到输出响应，全部基于标准库的标准签名。无论是人工排查还是模型理解，都一目了然。
 
-如果项目只有十几个接口,标准库完全够用。等到项目真的需要比较复杂的路由分组,再考虑引入 `chi` 这种本身很轻量、没有传递依赖的路由库。
+当项目规模扩大、需要更精细的中间件流水线与路由分组时，再引入像 `chi` 这样兼容标准库 `http.Handler` 接口且零额外依赖的轻量路由器即可。
 
-## JSON: `encoding/json/v2`
+## 3. 序列化：`encoding/json/v2`
 
-在 Go 过去的历史里,很多人对标准库的 `encoding/json` 颇有微词,主要嫌弃它底层依赖反射、性能不够极致、结构体零值处理(omitempty)不够优雅。
+在以往的实践中，标准库的 `encoding/json` 常因反射开销、内存分配较多而受到讨论，很多项目为此引入了各类第三方加速库。随着 `encoding/json/v2` 的推进，标准库提供了更贴合底层 I/O 的流式处理接口：
 
-于是各种第三方库野蛮生长:`json-iterator`、`sonic`, 但是这一切都在`v2`版本中得到了改善
-
-
-### 去除内存分配
-
-在 v2 的设计中,官方提供了两个关键的高性能核心函数:
-```
+```go
 json.UnmarshalRead(io.Reader, any)
 json.MarshalWrite(io.Writer, any)
 ```
 
-这两个函数的核心精髓就在于:直接对接底层的 `IO` 流,省去了所有中间态 `[]byte` 的内存开辟
-当请求进来时,`UnmarshalRead` 直接顺着 r.Body 的网络流边读边解码,不需要你在内存里开辟任何一个额外的 byte 切片去装整个 Body
-当响应返回时,`MarshalWrite` 直接把序列化好的二进制流无缝冲进 http.ResponseWriter,连一个临时字节缓冲都不用申请
+这两个函数的核心在于直接对接底层的 `io.Reader` 与 `io.Writer`：
+* 请求到达时，`UnmarshalRead` 直接从 `r.Body` 的网络流中解码，省去了在堆上分配中间临时 `[]byte` 切片的开销；
+* 响应返回时，`MarshalWrite` 直接将二进制字节流写入 `http.ResponseWriter`，减少了一次性缓冲区的构建。
 
-基于 `encoding/json/v2` 的这两个零拷贝特性,搭配 Go 的泛型,我们可以写出一个极简、对 Agent 极其友好的统一接入包
+配合泛型，可以封装出一套简单通用的响应与反序列化工具：
+
 ```go
 package render
+
+import (
+	"encoding/json/v2"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+)
 
 type BaseResponse struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
 }
+
 type Response[T any] struct {
 	BaseResponse
 	Data T `json:"data"`
 }
+
 func Success[T any](w http.ResponseWriter, code int, msg string, data T) {
 	writeJSON(w, code, Response[T]{
 		Code: code,
@@ -107,12 +101,14 @@ func Success[T any](w http.ResponseWriter, code int, msg string, data T) {
 		Data: data,
 	})
 }
+
 func Error(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, BaseResponse{
 		Code: code,
 		Msg:  msg,
 	})
 }
+
 func writeJSON[T any](w http.ResponseWriter, code int, response T) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -123,13 +119,14 @@ func writeJSON[T any](w http.ResponseWriter, code int, response T) {
 		log.Error().Err(err).Msg("Failed to write response")
 	}
 }
+
 func ReadBody[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 	var body T
 	if r.ContentLength == 0 {
 		return body, nil
 	}
 	if err := json.UnmarshalRead(r.Body, &body); err != nil {
-		if optional && errors.Is(err, io.EOF) {
+		if errors.Is(err, io.EOF) {
 			return body, nil
 		}
 		log.Error().Err(err).Msg("Failed to read/decode request body")
@@ -140,7 +137,8 @@ func ReadBody[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 }
 ```
 
-这样一来,`Handler` 层的代码就可以非常简洁地处理请求了
+在控制器中使用该工具解析数据，逻辑清晰且无隐藏状态：
+
 ```go
 func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
     req, err := render.ReadBody[CreateUserReq](w, r)
@@ -152,29 +150,20 @@ func (h *UserHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
         render.Error(w, http.StatusInternalServerError, "创建用户失败")
         return
     }
-    render.Success(w, "创建成功", user)
+    render.Success(w, http.StatusCreated, "创建成功", user)
 }
 ```
 
-那么有人会问主播了,主播主播,这个东西是个web框架都带有呀,`gin`也有类似的`ShouldBindJSON`,你这不是重复造轮子吗?
+## 4. 极致热点下的零反射处理
 
-有两个因素:
-1. `gin`因为要考虑到历史兼容性,他不会去引入`go1.27`这种比较新的版本中才出现的新的标准库实现,也就是我们付出了所谓的`抽象税`
-2. 我们没有办法他在的结构体(`c *gin.Context`)方法中去做拓展,这个下一节会讲到
-
-### 绕过反射
-
-在有些场景下,某些接口要求超高的`qps`,就连`marshal`,`unmarshal`这两个函数我们都想优化一下,这个时候怎么办呢? 在以往就需要引入上面说的一些第三方 `json` 库
-但 `encoding/json/v2` + `jsonvalue/text` 给予了在关键节点直接手写超高性能序列化和反序列化的能力
+在少数对吞吐量要求极高的核心接口中，如果需要彻底消除反射开销，`encoding/json/v2` 配合 `jsontext` 提供了按 Token 逐个字段流式编解码的能力：
 
 ```go
 package main
 
 import (
-	"encoding/json/v2"
 	"encoding/json/v2/jsontext"
 	"fmt"
-	"log"
 )
 
 type User struct {
@@ -253,3 +242,5 @@ func (u *User) UnmarshalFromJSON(dec *jsontext.Decoder) error {
 	return nil
 }
 ```
+
+这种写法将结构体各字段的编解码完全静态化，在运行时无须执行任何动态类型反射和结构体标签解析。代码逻辑直接映射到底层的状态转移，也便于模型针对特定高频数据结构进行精确推导与修改。
