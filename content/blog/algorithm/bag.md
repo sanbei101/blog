@@ -158,7 +158,7 @@ class Solution:
         dp = [-float('inf')] * (target + 1)
         dp[0] = 0
         for num in nums:                          # 每个数字只能用一次
-            for j in range(target, num - 1, -1):  # 倒序遍历（01背包）
+            for j in range(target, num - 1, -1):  # 倒序遍历(01背包)
                 dp[j] = max(dp[j], dp[j - num] + 1)
         return dp[target] if dp[target] != -float('inf') else -1
 ```

@@ -1,56 +1,45 @@
 ---
-title: 接口即文档, 全栈er实践指南
-description: 受够了写API文档? 
+title: 契约驱动协同:基于 OpenAPI 与 Orval 的端到端类型流转
+description: 用结构化契约替代文本对齐,构建端到端编译期安全防线
 weight: 10
 ---
 
-在开发中有一些很常见的场景:
+在前后端协同开发中,接口定义的高频变动通常是效率瓶颈:
 
-+ 开发**后台**时, 要为几乎每个`Model`生成管理的`CRUD`四个接口, 然后前端需要编写`api.ts`进行对接
-+ 某个**表单**突然 `新增/删减/修改` 了一个字段的名称, 前端需要同步修改
++ 业务管理后台中,每个数据实体均涉及标准 CRUD 接口的定义与前端调用层封装;
++ 表单模型调整字段名称或增删属性,前端需同步更新对应的数据模型与请求方法。
 
-这些需求都不复杂,但是不胜繁琐
+在缺乏确定性契约的场景下,依赖人工同步或通过自然语言提示让模型去阅读 Git Diff 修改代码,容易消耗额外上下文,且容易出现类型遗漏或命名不一致。
 
-在这个纯前端几乎已经绝迹的年代, 我们全栈er经常也需要包揽界面的开发, 如果有一套类型完备,注释明确的 `api.ts sdk`,再随便配置一个组件库,那么前端能力无比强大的大模型有`99%`的几率为我们生成一套美观的界面代码
+工程上更可靠的方案,是通过工具链建立自顶向下的契约流转:
 
-那么关键就在这里, 这个 `sdk` 由谁去写呢? 普通的做法是直接让 `AI` 阅读 `git diff`, 然后替我们做出更新
-
-> *"`@hander/user.go`, 阅读`commit`记录,这个接口变化的字段同步更新到`前端sdk`"*
-
-在开发的早期,字段频繁变动,如果每次出现都要让 AI 帮我们去同步修改 `sdk`,耗费 `Token` 不说,还费时费力,且容易疏忽或者写出风格不一致的代码
-
-这个痛点我思考了很久, 自认为想出了一个不错的办法, 这里分享给大家:
-
-这里需要用到两个 `cli` 工具库
-
-```
-go install github.com/swaggo/swag/v2/cmd/swag@latest <-- 这个是编写go接口注释,生成openapi规范的工具库
-pnpm add orval -D <-- 这个是生成前端 SDK 的工具库
+```bash
+go install github.com/swaggo/swag/v2/cmd/swag@latest # 基于 Go 接口注解生成 OpenAPI 契约规范
+pnpm add orval -D                                   # 基于 OpenAPI 契约自动生成前端强类型 SDK
 ```
 
-
+```text
+Go 注解定义 --> make openapi --> swagger.yaml 契约导出 --> pnpm gen:api --> 前端强类型 SDK
 ```
-Go 编写接口注释 --> make openapi --> openapi.yml --> pnpm gen:api --> 前端 SDK
-```
 
-从此接口文档不用写,字段名不用喊,开发效率大大提高
+通过这一流程,接口文档与类型系统保持同步,大幅降低了跨端交互的校验成本。
 
 ---
 
-## 举个栗子
+## 契约同步流程与端到端实践
 
-当我们让 Agent 接管一个前后端全栈需求,比如要实现一个类似小红书的 [发帖社交平台](https://github.com/sanbei101/blue-book-frontend)
+以一个发帖与点赞互动的社交场景(如 [blue-book 示例项目](https://github.com/sanbei101/blue-book-frontend))为例:
 
-> *"后端实现点赞/取消点赞接口,前端帖子详情页加上红心按钮,点击高亮,计数实时刷新。"*
+> *"后端实现点赞与取消点赞接口;前端帖子详情页渲染红心按钮,支持点击状态切换与计数实时刷新。"*
 
-传统流程与代码生成流程的对比:
+传统手动维护与契约驱动流转的对比:
 
+```text
+[ 传统模式 ] 接口文本描述/口头约定  ---> 前端手写请求与类型   ---> 契约滞后、字段漂移
+[ 契约驱动 ] Go 注解 --swag--> swagger.yaml --orval--> 前端 SDK ---> 编译器类型校验兜底
 ```
-[ 传统 ] 后端口头约定/手写文档 ---> 前端手写请求层 ---> 文档过期、字段漂移
-[ 现在 ] Go 注解 --swag--> swagger.yaml --orval--> 前端 SDK ---> 编译器兜底
-```
 
-前后端唯一需要对齐的东西,是一份由后端代码自动生成的 `openapi.yaml`, 它的制作过程,只需要在 `handler` 头顶多敲几行注释:
+前后端协作的核心依据,是由后端代码自动生成的 `swagger.yaml`。在 Go 处理函数上方配置结构化声明注解:
 
 ```go
 // 获取我点赞的帖子
@@ -68,9 +57,9 @@ func (h *LikeHandler) ListLikedPosts(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-`swag` 会解析这些注解,连同 `render.Response[T]` 泛型里的字段和 `json` tag,一并翻译成结构化的 `OpenAPI` 文档。注解就长在接口函数的头顶上,接口一改顺手就改,**文档和代码永远不存在两个版本**。
+`swag` 会解析这些注解,连同 `render.Response[T]` 泛型结构体中的字段与 `json` 标签,统一输出为标准 OpenAPI 契约文件。接口与注释位于同一源码文件中,变更天然保持一致。
 
-一条命令产出契约:
+通过 Makefile 构建契约:
 
 ```makefile
 # Makefile
@@ -80,11 +69,11 @@ swagger-init:
 	swag init -d internal/api,internal/pkg/render -g routes.go --parseInternal --v3.1 -ot yaml
 ```
 
-`make swagger` 一跑,最新的 `docs/swagger.yaml` 就躺在那里了。把它拷贝到前端仓库根目录,好戏开场。
+执行 `make swagger` 后,在 `docs/swagger.yaml` 输出最新契约,将其同步至前端工程根目录。
 
 ---
 
-在前端仓库根目录写一份 `orval.config.ts`:
+在前端工程根目录配置 `orval.config.ts`:
 
 ```typescript
 import { defineConfig } from "orval";
@@ -92,17 +81,17 @@ import { defineConfig } from "orval";
 export default defineConfig({
   bluebook: {
     input: {
-      target: "./swagger.yaml", // 接口契约, 从后端同步过来
+      target: "./swagger.yaml", // 接口契约规范来源
     },
     output: {
-      mode: "tags-split", // 按 @Tags 分文件
-      target: "src/api", // 生成目录
+      mode: "tags-split", // 按 @Tags 划分模块文件
+      target: "src/api", // 输出生成目录
       client: "react-query", // 生成 TanStack Query Hooks
-      httpClient: "axios", // 底层请求用 axios
-      formatter: "oxfmt", // 生成代码顺手格式化, 和上一章的 oxfmt 无缝衔接
+      httpClient: "axios", // 底层 HTTP 客户端
+      formatter: "oxfmt", // 使用 oxfmt 进行输出排版
       override: {
         mutator: {
-          path: "./src/mutator.ts", // 注入自定义请求实例
+          path: "./src/mutator.ts", // 注入自定义 Axios 请求实例
           name: "customInstance",
         },
       },
@@ -111,18 +100,18 @@ export default defineConfig({
 });
 ```
 
-跑一下 `pnpm gen:api`,全部接口瞬间变成 7300 多行带类型的代码,按 tag 整齐归档:
+运行 `pnpm gen:api`,所有接口自动派生为强类型代码,并按 Tag 进行模块归档:
 
-```
+```text
 src/api/
-├── api.schemas.ts      # 所有请求/响应的 TS 类型, 单一出口
-├── posts/posts.ts      # 帖子模块: 请求函数 + QueryKey + Hooks
+├── api.schemas.ts      # 所有请求/响应的 TypeScript 类型定义
+├── posts/posts.ts      # 帖子模块:请求函数 + QueryKey + React Query Hooks
 ├── likes/likes.ts      # 点赞模块
 ├── users/users.ts      # 用户模块
-└── ...                 # 按 @Tags 自动分家
+└── ...                 # 按 @Tags 自动化拆分
 ```
 
-点开任意一个生成文件,一个接口会被展开成"四件套"(节选):
+每个接口展开为完整的类型化调用单元:
 
 ```typescript
 /**
@@ -130,7 +119,7 @@ src/api/
  * Do not edit manually.
  */
 
-// 1. 纯请求函数, 参数与返回值全带类型
+// 1. 强类型请求函数,参数与返回值均具备类型推导
 export const getPostsPostId = (postId: string, options?: SecondParameter<typeof customInstance>, signal?: AbortSignal) => {
   return customInstance<RenderResponseApiGetPostsResponse>(
     { url: `/posts/${postId}`, method: "GET", signal },
@@ -138,43 +127,31 @@ export const getPostsPostId = (postId: string, options?: SecondParameter<typeof 
   );
 };
 
-// 2. QueryKey 生成器, 缓存失效再也不用手拼数组
+// 2. QueryKey 生成器,保障缓存清理的类型确定性
 export const getGetPostsPostIdQueryKey = (postId: string) => {
   return [`/posts/${postId}`] as const;
 };
 
-// 3 + 4. QueryOptions 与现成的 Hook, 组件里直接调用
+// 3. 内置 TanStack Query Hook,在组件内直接使用
 export function useGetPostsPostId<TData, TError = RenderErrorResponse>(...) { ... }
 ```
 
 ---
 
-### `mutator`: 业务逻辑收口到一处
+### `mutator`:统一收口底层传输与拦截逻辑
 
-生成的 `sdk` 对类型, 方法, 缓存进行了统一处理
+代码生成器负责结构与类型映射,跨请求的业务通信特征(如统一响应解构、鉴权失效续期)则收口于 `mutator.ts`:
 
-但还有一些业务模式需要我们手动编写一个 `mutator.ts` (一个 `axios` 的 `customInstance`) 来进行统一处理
-
-比如后端一般会把返回的data包含在一个 `apiResponse` 中, 通常长这样:
-```
-# 成功
+```text
+// 统一返回包装规范示例
 {
-  code: 200,
-  msg: "操作成功",
-  data: <- 这里是返回的数据
-}
-# 失败
-{
-  code: 400,
-  msg: "密码必须长于 6 个字符; 邮箱格式不合法"
+  "code": 200,
+  "msg": "操作成功",
+  "data": { ... }
 }
 ```
 
-这种包装有个好处就是, 当前端调用接口, 无论是成功还是失败, 所使用的 [`Message/Toast`](https://ui.shadcn.com/docs/components/base/toast) 组件都能弹出一个带有**明确信息**的提示(使用 `response.msg`)
-
-又比如, 后端的鉴权会返回两个 `token` (一个 `access_token`, 一个 `refresh_token`), 这个业务模式需要我们使用`拦截器`进行统一的保存,轮转处理
-
-所有个性化逻辑--`baseURL`、鉴权、响应拆包--收口到 `src/mutator.ts` 一个文件:
+针对双 Token 机制与全局错误拆包,可在 `src/mutator.ts` 中集中实现:
 
 ```typescript
 // src/mutator.ts
@@ -266,7 +243,7 @@ async function retryAfterRefresh(config: RetriableRequestConfig) {
   }
 }
 
-# token 拦截器
+// 统一响应与状态拦截
 AXIOS_INSTANCE.interceptors.response.use(
   async (response: AxiosResponse<ApiResponse>) => {
     const { code, msg, data } = response.data;
@@ -303,13 +280,13 @@ export const customInstance = <T>(
 export default customInstance;
 ```
 
-这带来的收益是乘法级的: 错误信封、`Token` 静默续期,写一次,接口全部生效
+错误信封解析与 Token 静默刷新在网络层实现单点收口,上层调用无需编写防御样板代码。
 
 ---
 
-### 业务页面: 只剩纯逻辑
+### 业务组件实现
 
-有了 `SDK`,帖子详情页的点赞逻辑长这样:
+引入自动生成的 SDK 后,组件中只需聚焦于状态流转与交互呈现:
 
 ```tsx
 import {
@@ -330,45 +307,46 @@ const handleLike = async () => {
     if (!post.viewer_liked) await likeMutation.mutateAsync({ postId });
     else await unlikeMutation.mutateAsync({ postId });
   } catch (err) {
-    if (err instanceof ApiError) toast.error(err.msg); // 错误文案后端说了算
+    if (err instanceof ApiError) toast.error(err.msg); // 使用统一的错误信息
   }
 };
 ```
 
-全程没有一行手写请求,没有一处 `any`,全部是类型完备,可读性极佳的优质代码:
-* 参数名拼错?`postId` 改成 `id`,`tsc` 当场爆红;
-* 后端把 `viewer_liked` 改名,`post.viewer_liked` 直接编译报错;
-* 想知道接口长什么样?生成函数头顶就是 `@Summary` 里的中文注释,`IDE` 悬浮即读。
+业务代码具备编译期检查能力:
+* 路径参数或请求体字段变更时,`tsc` 立即输出类型错误;
+* 后端修改响应字段时,前端引用处无法通过编译;
+* 接口描述作为 JSDoc 注释自动挂载在生成函数上,IDE 中悬浮即可查看。
 
-### ❌ 没有 orval 的灾难现场
+### 手工对接与口头契约的局限
 
-* 前后端并行开发,前端 Agent 只能隔空喊话等文档,或者去啃后端 `Go` 源码,白白烧掉几万 `Token` 的上下文;
-* 接口字段靠聊天记录对齐,后端一次重构,前端 `undefined` 满天飞,全靠用户帮忙发现 `Bug`;
-* 文档永远比代码慢一拍,联调会议开成"对字段名大会"。
+* 双端并行开发时,前端需等待后端提供文本或阅读后端 Go 代码,消耗会话上下文;
+* 字段对齐依赖口头或聊天记录,后端重构容易导致前端字段丢失或产生运行时异常;
+* 文档与代码容易脱节,产生版本不同步。
 
-### ✅ 装上 orval 的优雅流程
+### 契约驱动的代码生成与编译期校验
 
-后端把 `like_count` 重构成 `count`,前后端各自只跑三条命令:
+当后端将 `like_count` 字段重构为 `count` 时,仅需执行构建命令:
 
 ```sh
 # 后端
-make swagger                  # 重新生成 docs/swagger.yaml, 拷贝到前端仓库
+make swagger                  # 重新生成 docs/swagger.yaml,同步至前端仓库
 # 前端
 pnpm gen:api && pnpm build
 ```
 
-`tsc` 瞬间交出完整的不兼容清单:
+TypeScript 编译器输出明确的不兼容定位:
 
 ```text
 src/routes/PostDetailPage.tsx:87:30: error TS2339: Property 'like_count' does not exist on type 'RenderResponseApiGetPostsResponse'. Did you mean 'count'?
 ```
 
-`Agent` 拿着报错清单逐个修复,全程零沟通。**所谓前后端对齐,被压缩成了"重新生成 + 改到编译通过"。**
+Agent 根据编译诊断清单即可完成针对性修复,将双端联调验证收敛为确定性的编译检查回路。
 
 ---
 
-## Agent Prompt 调优
+## Agent 提示词配置实践
 
+在前端工程的 `package.json` 中配置生成入口:
 
 ```json
 {
@@ -378,18 +356,20 @@ src/routes/PostDetailPage.tsx:87:30: error TS2339: Property 'like_count' does no
 }
 ```
 
+前端工程配置规范(`AGENTS.md`):
+
 ```markdown
 ### 前端 API 使用规范
-1. `swagger.yaml` 是接口定义的唯一来源(从后端 `docs/swagger.yaml` 同步);运行 `pnpm gen:api` 由 Orval 重新生成 `src/api`。
-2. 严禁手动修改或新增 `src/api` 下的任何文件,它们是一次性生成物。
-3. 所有请求必须调用 `src/api` 中生成的方法,禁止在页面里自行写 `fetch`、`Axios endpoint` 或重复的请求类型;
-4. 页面请求失败优先展示 `ApiError.msg`。
+1. `swagger.yaml` 是接口定义的唯一来源;运行 `pnpm gen:api` 重新生成 `src/api`。
+2. 严禁手动修改或新增 `src/api` 目录下的任何文件,其归属自动化工具生成。
+3. 所有数据请求必须调用 `src/api` 中生成的方法,禁止在组件中直接手写 `fetch` 或重复声明响应类型。
+4. 请求异常优先展示 `ApiError.msg`。
 ```
 
-后端工作区则约定:
+后端工程配置规范:
 
 ```markdown
 ### 后端接口规范
 1. 接口注解或响应类型变更后,必须执行 `make swagger` 重新生成 `docs/swagger.yaml`。
-2. 注解统一使用泛型 `render.Response[T]`,保持 `@Success` 注释 tab 对齐,不要手写散装响应结构。
+2. 注解统一使用泛型 `render.Response[T]`,保持 `@Success` 注释格式规范,避免声明松散的无类型结构。
 ```

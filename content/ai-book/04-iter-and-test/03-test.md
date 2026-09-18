@@ -1,40 +1,40 @@
 ---
-title: Go 全面测试指南
-description: 无状态逻辑用单测,业务流程用真实环境,并发代码交给 synctest
+title: Go 全面测试:单元测试、容器化集成测试与 synctest 虚拟时间
+description: 划分测试边界,消除伪造 Mock 的逻辑幻觉
 weight: 30
 ---
 
-在 AI 接管大量编码工作以后,开发中最危险的一句话已经变成了:
+在人机协同开发中,最需要警惕的结论之一是:
 
-> *"代码写完了,测试也通过了。"*
+> *"代码已完成,测试已通过。"*
 
-听起来很稳,但点开测试文件一看,经常会发现另一番景象:
+审查测试代码时,常会发现以下工程隐患:
 
-* `Service` 依赖数据库,Agent 顺手写了一个 `FakeRepository`,让每个方法都返回 `nil`;
-* 测试只断言"没有报错",却没有检查数据到底有没有落库、事务有没有回滚;
-* 并发代码里塞一个 `time.Sleep(100 * time.Millisecond)`,在本地偶尔成功,放进 CI 就开始抽风。
+* 当 `Service` 依赖数据库时,模型生成了一个返回 `nil` 的 `FakeRepository`,使每个调用都直接忽略底层读写;
+* 测试仅断言无错误返回,未验证数据是否真实持久化或事务是否正确回滚;
+* 并发逻辑中硬编码 `time.Sleep(100 * time.Millisecond)`,在本地容易通过,而在 CI 资源紧张时因调度延迟产生偶发失败。
 
-这类测试最大的危害不是覆盖率低,而是会亮起一盏**错误的绿灯**。Agent 看到 `go test ./...` 全部通过,就会更加确信自己编写的 SQL、事务和并发逻辑没有问题,实际上它只是用自己生成的 `Fake` 证明了自己生成的代码。
+这类测试的风险在于提供虚假的通过信号:模型基于自创的 Mock 验证了自身生成的逻辑,而真实的 SQL、事务与并发约束从未被执行检验。
 
-测试不应该替代码作证,测试应该拿出代码无法伪造的事实。
+测试的核心目标不是为代码提供形式上的背书,而是提供不可伪造的运行时事实。
 
-我的划分方式很简单:
+工程划分标准如下:
 
+```text
+无状态纯计算 --> 表驱动单元测试:确定性输入映射确定性输出
+业务状态流转 --> 真实集成测试:基于容器加载真实数据库,执行实际迁移文件
+并发与时钟   --> testing/synctest:虚拟时钟与受控的 Goroutine 调度
 ```
-无状态纯逻辑 --> 单元测试: 输入确定,输出就必须确定
-业务状态流转 --> 集成测试: 连接真实数据库,执行真实 migration
-并发与时间   --> testing/synctest: 虚拟时间 + 可观测的 goroutine 调度
-```
 
-这不是要把每个函数都测一遍,更不是追求好看的 `100% coverage`。所谓全面测试,是让每种风险都撞上它真正的边界:算法错误交给单测,业务与基础设施错位交给集成测试,并发时序错误交给 `synctest` 和 `race detector`。
+这种划分并非盲目追求全量行覆盖率,而是确保各类缺陷受到对应层级的客观约束:纯算法缺陷交由单测捕获,数据持久化缺陷由集成测试拦截,并发时序缺陷由 `synctest` 与竞态检测器共同收敛。
 
 ---
 
-## 无状态逻辑: 单元测试
+## 无状态逻辑:表驱动单元测试
 
-如果一个函数没有数据库、网络、文件、全局变量和当前时间,返回值只取决于输入,它就是单元测试最喜欢的形状。
+若目标函数无外部 I/O 依赖(无数据库、网络交互、全局状态及系统时钟变更),输出严格取决于入参,则最适合采用单元测试。
 
-例如帖子热度计算:
+例如帖子热度评分计算:
 
 ```go
 func Score(likes, comments int, age time.Duration) int {
@@ -43,7 +43,7 @@ func Score(likes, comments int, age time.Duration) int {
 }
 ```
 
-这种函数一个表驱动测试就足够把边界锁死:
+此类函数使用表驱动测试即可全面覆盖边界状态:
 
 ```go
 func TestScore(t *testing.T) {
@@ -68,17 +68,15 @@ func TestScore(t *testing.T) {
 }
 ```
 
-单元测试的优势就是快。几十、几百个 case 可以在毫秒内跑完,Agent 每改一行代码都能立刻得到反馈。
+单元测试执行耗时在毫秒级,模型可在单轮迭代内快速确认逻辑正确性。
 
-判断标准也很直接:
-
-* 字符串解析、参数校验、排序、金额计算、状态判断等纯函数,优先写单元测试;
+适用场景:字符串解析、参数校验、排序算法、状态机判断等纯逻辑函数。
 
 ---
 
-## 业务逻辑: Fake 最容易制造幻觉
+## 业务状态流转:避免过度使用 Fake 产生的伪测试闭环
 
-假设我们正在实现"重复点赞只能计数一次"。Agent 很容易生成下面这种测试:
+假设正在实现"重复点赞具备幂等性"的业务逻辑。模型容易生成如下测试:
 
 ```go
 type fakeLikeRepository struct{}
@@ -96,34 +94,32 @@ func TestLikePost(t *testing.T) {
 }
 ```
 
-测试当然会通过,因为 `fakeLikeRepository.Add` 被写死成了成功。
+该测试虽然顺利通过,但关键的工程约束均未被执行检验:
 
-但真正上线时决定这个功能能不能工作的东西,它一件也没有验证:
+* 数据库迁移脚本中是否存在 `UNIQUE(user_id, post_id)` 联合索引;
+* SQL 语句中的表名是否与当前 Schema 匹配;
+* 重复插入操作是触发主键冲突报错,还是由 `ON CONFLICT DO NOTHING` 正确消化;
+* 点赞记录插入与总数自增是否位于同一个事务中;
+* 外键约束与级联删除是否有效。
 
-* migration 里到底有没有 `UNIQUE(user_id, post_id)`;
-* SQL 使用的是 `post_likes` 还是 Agent 幻想出来的 `likes`;
-* 重复插入会被幂等处理,还是直接抛出唯一键冲突;
-* 点赞记录和 `posts.like_count` 是否处于同一个事务;
-* 用户或帖子不存在时,外键与业务错误能否正确返回。
+Fake 只能反映编写者预设的行为。一旦模型在第一轮对业务模型的理解产生偏差,后续生成的 Fake 和断言将沿袭该偏差,造成逻辑自洽但在真实环境中运行失败的局面。
 
-`Fake` 只会回答测试作者预先写进去的答案。更要命的是,实现代码、接口、Fake 和测试经常由同一个 Agent 在同一轮对话里生成:只要它在第一步理解错了业务,后面所有文件就会整整齐齐地一起错下去。
-
-```
-[ Fake 闭环 ] AI 猜测接口 --> AI 实现 Fake --> AI 按同一猜测写断言 --> 全绿,实际数据库一跑就炸
-[ 真实闭环 ] AI 启动容器 --> 执行真实 migration --> 调用真实 Repository --> 数据库直接裁决
+```text
+[ Mock 闭环 ] 模型假设接口 ---> 模型编写 Fake ---> 基于相同假设断言 ---> 虚假通过,生产报错
+[ 真实闭环 ] 启动真实容器 ---> 执行实际迁移文件 ---> 调用真实数据层   ---> 数据库引擎直接裁决
 ```
 
-因此,只要测试目标涉及 `Handler`、`Service`、`Repository`、事务或数据状态流转,我会直接写集成测试。不要拿一个会说"好的"的 `FakeXX` 来冒充业务验证。
+因此,对于涉及 `Handler`、`Service`、`Repository`、数据库事务及状态变更的业务,应优先使用真实集成测试验证。
 
-当然,`Fake` 并非永远不能出现。它适合注入"支付网关超时"、"对象存储返回 500"这类很难稳定制造的错误分支;但它只能证明失败处理逻辑,不能替真实数据库、真实协议或第三方沙箱证明主流程正确。
+Fake 的合理应用场景仅限于稳定模拟极端外部异常(如第三方支付网关超时、对象存储服务 500 等不可控分支)。
 
 ---
 
-## 一个全局 `helper.go`,造出最小真实环境
+## 基于 testcontainers-go 构建真实数据库环境
 
-集成测试最常见的反对意见是环境太难搭:每个测试文件都要连接数据库、执行 migration、清理数据,Agent 最后又会复制出几百行初始化代码。
+集成测试的主要维护成本在于测试环境的准备与清理。
 
-解决办法并不复杂,在 `internal/testutil/helper.go` 放一个全项目共用的环境入口,使用 [`testcontainers-go`](https://golang.testcontainers.org/) 启动和生产相同大版本的数据库:
+在 `internal/testutil/helper.go` 中建立统一的环境入口,使用 [`testcontainers-go`](https://golang.testcontainers.org/) 启动与生产版本一致的临时数据库:
 
 ```sh
 go get github.com/testcontainers/testcontainers-go/modules/postgres
@@ -180,9 +176,9 @@ func Postgres(t *testing.T) *pgxpool.Pool {
 }
 ```
 
-这里最关键的不是容器,而是**继续运行项目自己的 migration**。千万不要为了测试重新手写一份 `CREATE TABLE`,否则生产 schema 和测试 schema 很快又会分裂成两个世界。
+这里关键在于**直接执行项目原生的 migration 脚本**,避免在测试中单独维护一份建表语句导致与生产环境偏离。
 
-有了这一个 Helper,业务测试只关心业务本身:
+通过该工具函数,业务测试可专注于状态验证:
 
 ```go
 func TestLikePostIsIdempotent(t *testing.T) {
@@ -220,30 +216,26 @@ func TestLikePostIsIdempotent(t *testing.T) {
 }
 ```
 
-这一个测试会同时碰撞 migration、SQL、唯一约束、Repository 和 Service。任何一层出现字段漂移或事务错误,数据库都会立刻把错误甩回终端,Agent 再也无法靠脑补宣布成功。
+该测试覆盖了数据迁移、SQL 执行、唯一约束冲突处理与数据层映射。出现任何字段不匹配或事务异常,数据库引擎将直接抛出明确错误。
 
-注意,全局复用的是 `helper.go` 里的**创建方式**,不是一份永久共享的脏数据库。默认让每个测试获得隔离环境最省心;只有容器启动时间真的成为瓶颈以后,再考虑每个 package 共用容器并通过独立 database、schema 或 snapshot 重置数据。
-
-所谓"最小环境",也不是一口气启动 `Postgres + Redis + Kafka + MinIO` 全家桶。这个业务路径只依赖 `PostgreSQL`,那就只启动 `PostgreSQL`;测试真正走到缓存或消息队列时,再把对应容器加进来。
+环境遵循按需引入原则:仅依赖 PostgreSQL 的模块只启动对应容器;涉及缓存或流式消息时再按需扩充对应组件。
 
 ---
 
-## `testing/synctest`:把并发时间关进实验室
+## `testing/synctest`:纳秒级虚拟时间与并发确定性调度
 
-数据库可以装进容器,但并发与时间一直是 Go 测试里更难控制的部分。
+在测试并发与定时任务时,传统方案常通过调整时间间隔并配合 `time.Sleep` 验证。这种方式测试执行慢,且容易受系统调度抖动影响而产生非确定性失败。
 
-过去测试一个每小时执行一次的后台任务,常见写法是把间隔改成 `10ms`,然后在测试里 `time.Sleep(20ms)`。这种做法既慢又不可靠:CI 机器一忙,20ms 内 Goroutine 没抢到调度,测试就会随机失败;把 Sleep 加到一秒,套件又会越来越慢。
+Go 1.25 正式引入标准库 [`testing/synctest`](https://pkg.go.dev/testing/synctest):
 
-Go 1.25 将实验特性正式升级为标准库 [`testing/synctest`](https://pkg.go.dev/testing/synctest)。
+* `synctest.Test` 构建隔离的并发 bubble,管理其内部启动的全部 Goroutine;
+* bubble 内的 `time.Sleep`、`time.Timer` 与 `time.Ticker` 接入虚拟时钟系统。当内部 Goroutine 全部处于阻塞状态时,时钟直接跳跃至下一个就绪事件;
+* `synctest.Wait` 等待其他 Goroutine 进入稳定阻塞状态,无需硬编码等待时间;
+* 未退出的泄露协程在测试结束时将被明确捕获。
 
-* `synctest.Test` 会创建一个隔离的并发 "bubble",其中启动的 Goroutine 都归这个测试管理;
-* bubble 内的 `time.Sleep`、`time.Timer`、`time.Ticker` 使用虚拟时钟,所有 Goroutine 阻塞后,时间会直接跳到下一个事件;
-* `synctest.Wait` 会等到其他 Goroutine 全部稳定阻塞,不需要再猜一个 10ms;
-* 测试结束时仍未退出的 Goroutine 会暴露死锁或泄漏,而不是悄悄留在下一个测试里。
+以异步审核超时的时序控制为例:
 
-举个栗子
-
-用户发布帖子后,系统会把正文交给异步审核 Worker。审核结果必须在 3 秒内返回;超过 3 秒仍没有结果,接口就应该拒绝本次发布,避免未经审核的内容直接进入公开时间线:
+用户发布内容后由异步 Worker 处理,系统设定 3 秒超时限制;超时未完成则拒绝发布:
 
 ```go
 var ErrModerationTimeout = errors.New("moderation timeout")
@@ -268,9 +260,9 @@ func AwaitModeration(ctx context.Context, result <-chan ModerationResult) (Moder
 }
 ```
 
-过去为了测试它,要么真的等待 3 秒,要么专门把生产代码改成接收一个 `timeout` 参数,测试时偷偷传入 `10ms`。前者让测试越来越慢,后者则意味着测试与生产根本没有跑在相同的时间配置上。
+传统测试要么实际等待 3 秒,要么在生产代码中侵入式增加超时入参以便测试传入 10ms。
 
-使用 `synctest` 后,我们可以直接使用生产环境的 3 秒超时,并精确检查它的前后边界:
+使用 `synctest` 可以在保持生产级 3 秒超时参数的前提下,在数毫秒内完成纳秒级边界断言:
 
 ```go
 func TestAwaitModerationTimeout(t *testing.T) {
@@ -282,7 +274,7 @@ func TestAwaitModerationTimeout(t *testing.T) {
 			done <- err
 		}()
 
-		// 还差 1ns 才到 3 秒,此时绝不能提前超时。
+		// 推进至距截止时间仅剩 1ns,此时不可提前触发超时
 		synctest.Sleep(3*time.Second - time.Nanosecond)
 		select {
 		case err := <-done:
@@ -290,7 +282,7 @@ func TestAwaitModerationTimeout(t *testing.T) {
 		default:
 		}
 
-		// 再前进 1ns,审核等待必须立即结束。
+		// 再推进 1ns 跨越边界,此时必须触发超时
 		synctest.Sleep(time.Nanosecond)
 		if err := <-done; !errors.Is(err, ErrModerationTimeout) {
 			t.Fatalf("AwaitModeration() error = %v, want %v", err, ErrModerationTimeout)
@@ -299,9 +291,9 @@ func TestAwaitModerationTimeout(t *testing.T) {
 }
 ```
 
-这段测试会在虚拟时间里完整走过 3 秒,现实中仍然只需要几毫秒。它验证的也不只是"最终返回了超时",而是把业务真正关心的时间边界锁死:**3 秒前不能失败,3 秒后不能继续等待**。
+测试在虚拟时间中走过 3 秒,但在宿主机上仅耗费数毫秒,精确验证了 3 秒阈值的前后边界。
 
-同一个场景还可以验证 Worker 在 2 秒时返回结果,等待方能够立刻收到:
+同样可验证在 2 秒时提前返回成功结果的场景:
 
 ```go
 func TestAwaitModerationApproved(t *testing.T) {
@@ -323,46 +315,40 @@ func TestAwaitModerationApproved(t *testing.T) {
 }
 ```
 
-Worker 里的 `time.Sleep(2 * time.Second)` 同样走的是虚拟时钟,所以这个成功用例也不会真的阻塞 2 秒。
-
-`synctest` 也有明确边界:不要在 bubble 里访问真实网络、外部进程或 Testcontainers,因为这些 I/O 不受虚拟时钟控制。数据库业务交给集成测试,纯并发状态机交给 `synctest`,各管各的风险。
-
-它也不能替代 Race Detector。`synctest` 让时序可控,`go test -race` 负责发现未同步读写,两者应该一起使用:
+`synctest` 适用于纯内存的并发状态机与时序逻辑。涉及真实网络和容器 I/O 的场景应由集成测试覆盖,同时配合 `go test -race` 排查数据竞争:
 
 ```sh
 go test -short ./...          # 快速单元测试
-go test -count=1 ./...        # 包含 Testcontainers 的完整测试
-go test -race -count=1 ./...  # 并发竞争检查
+go test -count=1 ./...        # 包含集成测试的完整套件
+go test -race -count=1 ./...  # 并发竞态检测
 ```
 
 ---
 
-### ❌ 只有 Fake 的 AI 测试闭环
+### 基于全量 Mock 的测试缺陷
 
-* Agent 为每个依赖生成一套 `FakeXX`,测试代码比业务代码还长;
-* 所有 Fake 都返回预期答案,覆盖率一路上涨,真实 migration 和 SQL 从未运行;
-* 并发测试依赖真实 `Sleep`,本地绿、CI 红,最后大家习惯性重跑直到通过;
-* Agent 根据错误前提同时生成实现与测试,形成一套逻辑自洽、运行必炸的幻觉系统。
+* 为每个依赖编写 Fake 实现,测试代码体量远超业务代码;
+* Fake 返回预先设定的确定性结果,真实的 SQL 语法与数据约束从未被验证;
+* 并发测试依赖随机 `time.Sleep`,容易在持续集成流水线中出现偶发失败;
+* 错误的先验假设同时污染实现与测试,形成形式上全绿但缺乏有效性的测试集。
 
-### ✅ 全面测试的验证闭环
+### 多层次测试的确定性验证闭环
 
-* 无状态函数用快速单测锁定输入输出,每次修改都能秒级反馈;
-* 业务路径通过统一 `helper.go` 拉起最小真实环境,让数据库约束和 migration 参与裁决;
-* 并发代码进入 `synctest` bubble,虚拟时间消灭慢测试与随机 Sleep;
-* `go test ./...` 和 `go test -race ./...` 共同成为 Agent 交付前不可跳过的门禁。
-
-全面测试真正节省的不是线上修 Bug 的时间,而是人类反复审查 AI 猜测的时间。测试一旦连接到真实边界,报错就会带着 SQL、约束、竞争位置和具体断言回到终端,Agent 可以继续迭代,而不是等用户上线以后替它发现问题。
+* 无状态计算通过表驱动单测锁定输入输出;
+* 业务数据流转通过真实容器拉起数据库并应用迁移脚本,由数据库引擎校验约束;
+* 并发状态机进入 `synctest` 虚拟时间 bubble,消除非确定性等待;
+* 结合 `-race` 竞态检测作为提交门禁,将质量判定收敛于真实的系统表现。
 
 ---
 
-## Agent Prompt 调优
+## Agent 提示词配置实践
 
 ```markdown
 ### Go 测试规范
-1. 无状态、无 I/O、输出仅由输入决定的函数,使用标准库 `testing` 编写表驱动单元测试。
-2. 涉及 Handler、Service、Repository、数据库事务或业务状态流转的功能,必须编写集成测试;通过 `internal/testutil/helper.go` 和 Testcontainers 启动最小真实依赖,并执行项目原有 migration。
-3. 禁止使用 `FakeXX`、Mock Repository 或内存 Map 代替真实数据库后宣称业务测试完成。Fake 只允许用于稳定制造第三方服务失败等异常分支,且必须说明它没有覆盖真实协议。
-4. 并发、超时、定时器和 Goroutine 生命周期使用 `testing/synctest` 验证,禁止用任意时长的真实 `time.Sleep` 猜测调度完成。
-5. 测试之间必须数据隔离,不得依赖执行顺序或共享上一个测试留下的状态。
-6. 交付 Go 代码前必须执行 `go test -count=1 ./...`;涉及并发时还必须执行 `go test -race -count=1 ./...`,不得仅汇报某个 Fake 单测通过。
+1. 无外部 I/O、输出严格由输入决定的纯计算函数,使用标准库 `testing` 编写表驱动单元测试。
+2. 涉及 Handler、Service、Repository、数据库事务或状态变更的业务,必须编写集成测试;通过 `internal/testutil/helper.go` 和 Testcontainers 启动真实依赖并应用项目迁移脚本。
+3. 禁止使用空返回的 Fake Repository 替代数据库验证。Fake 仅限于稳定模拟不可控的外部依赖故障。
+4. 并发、超时与定时器控制使用 `testing/synctest` 验证,严禁使用任意时长的真实 `time.Sleep` 进行调度猜测。
+5. 测试用例之间必须维持数据隔离,避免相互依赖执行顺序或残留数据。
+6. 提交前必须执行 `go test -count=1 ./...`;涉及并发逻辑时执行 `go test -race -count=1 ./...`。
 ```
