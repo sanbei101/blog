@@ -14,45 +14,39 @@ weight: 40
 something went wrong
 ```
 
-排查将缺乏必要的事实支撑:无法定位具体接口、用户 ID、数据载荷或下游依赖状态,亦无法量化故障的影响范围与发生频次。
+排查将缺乏必要的事实支撑:无法定位具体接口、用户 ID、数据载荷或下游依赖状态,亦无法量化故障的影响范围与发生频次。系统并非没有缺陷,而是缺陷发生时未保留现场证据。
 
-系统并非没有缺陷,而是缺陷发生时未保留现场证据。
+> [!TIP] 结构化日志与生产排错证据链
+> 在真实分布式系统中,缺陷发生时若无现场证据,任何排查都沦为推测。将每条日志视为具备结构化字段(`request_id`、`operation`、`duration_ms`)的离散事件,由顶层统一记录单次错误,杜绝多层重复打印。
 
-日志是可观测性体系的基础入口。可观测性通常涵盖三类核心信号:
+可观测性体系通常涵盖三类核心信号:
+
+- **Logs**:记录特定业务事件发生的具体上下文与异常现场;
+- **Metrics**:统计同类事件的发生频次、速率与聚合趋势;
+- **Traces**:串联单次请求跨服务与跨函数的完整调用链路。
+
+工程中统一的标准采集链路:
 
 ```text
-Logs    -> 记录特定业务事件发生的具体上下文
-Metrics -> 统计同类事件的发生频次、速率与聚合趋势
-Traces  -> 串联单次请求跨服务与跨函数的完整调用链路
+Go 服务进程 ──(stdout 结构化 JSON)──→ 日志采集 Agent (Grafana Alloy) ──→ Loki ──→ Grafana
 ```
 
-日志是最直接捕获单次失败根因的信号载体。工程上通常采用统一的结构化采集链路:
-
-```text
-Go 服务进程 -> stdout 结构化 JSON -> 日志采集 Agent (如 Grafana Alloy) -> Loki -> Grafana
-```
-
-这套链路能够支撑服务从本地调试过渡至生产排错,使模型与开发人员能够依据真实的错误上下文进行根因分析与代码重构,消除对模糊报错的无端推测。
+这套链路能够支撑服务从本地调试平滑过渡至生产排错,使模型与开发人员能够依据真实的错误上下文进行根因分析与代码重构,消除对模糊报错的推测。
 
 ---
 
 ## 结构化事件与非结构化文本
 
-早期实现中常直接采用控制台标准输出:
+对比早期非结构化输出与生产级结构化事件:
 
-```go
+```go {tab="传统非结构化输出 (无法检索与聚合)" group="log_format" value="fmt"}
 if err := service.Publish(ctx, userID, postID); err != nil {
     fmt.Println("publish failed", err)
     http.Error(w, "internal error", http.StatusInternalServerError)
     return
 }
 ```
-
-此类输出仅能标明存在失败,进入日志聚合系统后,纯文本格式无法直接按字段进行索引过滤、指标统计与告警编排。
-
-生产级实践应将每条日志视为独立的**结构化事件**:
-
-```json
+```json {tab="生产级结构化事件 (字段化与链路分析)" group="log_format" value="json"}
 {
   "time": "2026-09-08T14:20:31.120+08:00",
   "level": "error",
@@ -71,40 +65,26 @@ if err := service.Publish(ctx, userID, postID); err != nil {
 }
 ```
 
-通过这一结构,人类可直观阅读 `msg` 与 `error`,监控系统可针对 `service`、`operation`、`level` 与 `error_type` 进行过滤和聚合告警,模型亦可依据 `request_id` 自动串联请求全生命周期的上下文。
+通过结构化 JSON,人类可直观阅读 `msg` 与 `error`,监控系统可针对 `service`、`operation`、`level` 与 `error_type` 进行过滤和聚合告警,模型亦可依据 `request_id` 自动串联请求全生命周期的上下文。
 
-工程记录原则:
+工程记录维度与标准字段规范:
 
-> **在系统状态迁移与失败边界处,必须记录具备确定诊断价值的关键字段。**
-
-"详尽记录"指在核心边界保留充足的上下文。面对故障时,日志应能直接回答如下问题:
-
-| 维度 | 建议字段 |
-| --- | --- |
-| 故障服务 | `service`、`env`、`version`、`host` |
-| 关联请求 | `request_id`、`trace_id`、`method`、`route` |
-| 业务动作 | `operation`、`user_id`、`resource_id` |
-| 外部依赖 | `dependency`、`sql_operation`、`upstream_status` |
-| 异常属性 | `error_type`、`error`、`retryable` |
-| 影响评估 | `status`、`duration_ms`、`attempt` |
-
-字段命名应当在组织内维持统一约定,避免出现 `user_id`、`uid`、`account_id` 混用的情况,以保障监控看板与告警规则的复用性。
+| 维度 | 建议字段 | 作用说明 |
+| :--- | :--- | :--- |
+| 故障服务 | `service`、`env`、`version`、`host` | 确认系统拓扑与发布版本 |
+| 关联请求 | `request_id`、`trace_id`、`method`、`route` | 串联分布式上下文 |
+| 业务动作 | `operation`、`user_id`、`resource_id` | 锁定受影响的具体实体 |
+| 外部依赖 | `dependency`、`sql_operation`、`upstream_status` | 识别数据库、缓存或下游服务瓶颈 |
+| 异常属性 | `error_type`、`error`、`retryable` | 确定错误类别与重试策略 |
+| 影响评估 | `status`、`duration_ms`、`attempt` | 量化请求耗时与重试轮次 |
 
 ---
 
 ## 异常路径的上下文完整性
 
-日志的核心价值主要体现在异常分支上。成功日志仅需标识流程正常终结;失败日志则需明确记录失败阶段、核心入参及依赖调用的反馈。
+日志的核心价值主要体现在异常分支上。成功日志仅需标识流程正常终结;失败日志则需明确记录失败阶段、核心入参及依赖调用的反馈:
 
-以发帖业务为例,流程通常包含参数校验、内容过滤与数据库落盘。缺乏细节的日志难以支撑排障:
-
-```go
-log.Error().Err(err).Msg("publish failed")
-```
-
-应当显式记录业务操作及关键上下文:
-
-```go
+```go title="internal/service/publish.go"
 log.Error().
     Err(err).
     Str("service", "api").
@@ -121,15 +101,15 @@ log.Error().
 
 在排查特定故障时,不仅可依据 `request_id` 串联请求链路,亦可通过 `operation="post.publish"` 与 `error_type="unique_violation"` 统计故障影响面。
 
-### 敏感凭证过滤与数据脱敏
+### 敏感凭据过滤与数据脱敏
 
 详尽记录不等于全量转储原始报文。日志采集需严格执行数据安全合规边界:
 
-* 严禁记录用户密码、短信验证码、银行卡号及完整身份证件号码;
-* 严禁记录 `access_token`、`refresh_token`、Cookie 会话标识与 API 签名私钥;
-* 个人联系方式(邮箱、手机号、实体地址)须经过脱敏处理;
-* 避免打印大型请求载荷正文与二进制文件流;
-* 打印 SQL 时避免包含未经参数化过滤的敏感明文。
+- 严禁记录用户密码、短信验证码、银行卡号及身份证件号码;
+- 严禁记录 `access_token`、`refresh_token`、Cookie 会话标识与 API 签名私钥;
+- 个人联系方式(邮箱、手机号、地址)必须经过掩码脱敏;
+- 避免打印大型请求载荷正文与二进制文件流;
+- 打印 SQL 时避免包含未经参数化过滤的敏感明文。
 
 关联数据时,记录业务主键或加密散列值即可满足排查需要。
 
@@ -168,7 +148,7 @@ Worker 消费任务失败       -> 由 Worker 消费边界记录一次失败事�
 
 ### 底层包装错误
 
-```go
+```go title="internal/repository/post.go"
 var ErrPostNotFound = errors.New("post not found")
 
 type PostRepository struct {
@@ -191,13 +171,13 @@ func (r *PostRepository) Find(ctx context.Context, postID int64) (Post, error) {
 }
 ```
 
-`Repository` 层负责执行 SQL,但并不决定该错误应映射为 404 响应、重试操作还是死信队列投递,因此不应在底层输出缺乏业务全貌的日志。
+`Repository` 层负责执行 SQL,并不决定错误应映射为 404 响应、重试还是告警,因此不应在底层输出缺乏业务全貌的日志。
 
-通过 `%w` 包装错误,既保留了原始根因,又在错误链中追加了调用点信息,便于上层使用 `errors.Is` 与 `errors.As` 实施分支判断。
+通过 `%w` 包装错误,既保留原始根因,又在调用栈中追加节点信息,便于上层使用 `errors.Is` 实施分支判断。
 
 ### 上层统一收口与记录
 
-```go
+```go title="internal/service/post.go"
 func (s *PostService) Publish(ctx context.Context, userID, postID int64) error {
     post, err := s.posts.Find(ctx, postID)
     if err != nil {
@@ -211,7 +191,9 @@ func (s *PostService) Publish(ctx context.Context, userID, postID int64) error {
     }
     return nil
 }
+```
 
+```go title="internal/handler/post.go"
 func (h *PostHandler) Publish(w http.ResponseWriter, r *http.Request) {
     start := time.Now()
     userID := currentUserID(r.Context())
@@ -252,19 +234,19 @@ func (h *PostHandler) Publish(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-在此流程中,`Repository` 与 `Service` 均未冗余打印,错误由 `%w` 级联形成完整链条:
+`Repository` 与 `Service` 均未冗余打印,错误由 `%w` 级联形成调用栈:
 
 ```text
 mark post published: query post 9001: connection refused
 ```
 
-`Handler` 在掌握 `user_id`、`post_id`、`request_id` 与协议上下文的节点统一记录单次日志,确保日志信息的密度与有效性。
+`Handler` 在掌握用户、请求与协议上下文的边界统一记录单次日志,确保日志密度与信噪比。
 
-### 访问日志与业务错误日志的职责划分
+### 访问日志与业务错误日志的分离
 
-HTTP 中间件通常记录请求级别的访问日志:
+HTTP 中间件统一记录请求级别的访问日志:
 
-```json
+```json title="访问日志 (中间件输出)"
 {
   "level": "info",
   "operation": "http.request",
@@ -277,11 +259,8 @@ HTTP 中间件通常记录请求级别的访问日志:
 }
 ```
 
-两类日志具备不同的关注点:
-* **访问日志**:记录接口的流量特征、状态码分布与耗时表现;
-* **业务错误日志**:记录异常根因与受影响的实体上下文。
-
-两类日志各自维系明确的所有权,中间件无需重复捕获业务错误并以 ERROR 级别二次打印。
+- **访问日志**:记录接口的流量特征、状态码分布与耗时表现;
+- **业务错误日志**:记录异常根因与受影响的实体上下文。
 
 ---
 
@@ -289,7 +268,7 @@ HTTP 中间件通常记录请求级别的访问日志:
 
 为串联单次请求涉及的全部日志记录,需要引入跨组件的关联标识:
 
-```go
+```go title="internal/middleware/request_id.go"
 type requestIDKey struct{}
 
 func withRequestID(next http.Handler) http.Handler {
@@ -313,24 +292,20 @@ func requestIDFrom(ctx context.Context) string {
 }
 ```
 
-在微服务架构中,可结合 OpenTelemetry 注入并传播 `trace_id` 与 `span_id`,在日志中同步记录 `request_id` 与分布式追踪标识,实现日志检索与链路追踪的联动下钻。
-
 ---
 
 ## 日志级别语义约束
 
 日志级别需准确反映系统的运行状态与干预要求:
 
-```text
-DEBUG -> 本地开发与联调细节,生产环境默认关闭
-INFO  -> 关键生命周期节点与正常完成的业务记录
-WARN  -> 业务正常返回但存在潜在风险的异常偏离
-ERROR -> 操作中断且无法恢复,需要排查或触发告警
-```
+- `DEBUG` → 本地开发与联调细节,生产环境默认关闭
+- `INFO`  → 关键生命周期节点与正常完成的业务记录
+- `WARN`  → 业务正常返回但存在潜在风险的异常偏离(如常规 404 或参数不合法)
+- `ERROR` → 操作中断且无法恢复,需要排查或触发即时告警
 
-预期内的业务分支(如资源 404、常规参数校验不通过)通常使用 `WARN` 级别记录,避免错误指标虚高影响监控系统的真实可用性告警:
+预期内的业务分支使用 `WARN` 级别记录,避免错误指标虚高影响监控系统的可用性告警:
 
-```go
+```go title="业务偏离警告日志"
 log.Warn().
     Str("operation", "post.publish").
     Str("request_id", requestIDFrom(ctx)).
@@ -344,7 +319,9 @@ log.Warn().
 
 ## Agent 提示词配置实践
 
-```markdown
+在工程规范文件(`AGENTS.md`)中建立契约:
+
+```markdown title="AGENTS.md"
 ### Go 日志规范
 1. 所有服务统一以单行结构化 JSON 输出至 stdout/stderr,严禁在业务逻辑中直接使用 `fmt.Println`。
 2. 异常处理分支必须记录完备的结构化字段:`service`、`env`、`operation`、`request_id`、`trace_id` 以及业务主键。
@@ -352,3 +329,13 @@ log.Warn().
 4. 依据单点记录原则,由最终处理错误的顶层(如 Handler、Worker 消费入口)统一记录日志。
 5. 严禁记录密码、密钥、Token、Cookie 及未脱敏的用户隐私数据。
 ```
+
+---
+
+## 生产可观测日志闭环
+
+1. **入口唯一标识注入 (`request_id`)**:中间件在入口处生成唯一请求 ID 并注入 Context 与 HTTP Header。
+2. **底层错误显式包装**:Repository 与 Service 层严禁打印日志,使用 `%w` 追加上下文。
+3. **顶层单点结构化输出**:Handler 或 Worker 消费边界记录一次包含业务主键与耗时的结构化 JSON。
+4. **敏感数据严格脱敏**:严禁将密钥、Token 或未脱敏用户隐私写入标准输出。
+{.steps}
