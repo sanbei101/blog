@@ -17,7 +17,7 @@ menus:
 cascade:
   type: book
   footer_style: slim
-  sidebar_headings: 3
+  sidebar_headings: 2
 ---
 
 # 总章
