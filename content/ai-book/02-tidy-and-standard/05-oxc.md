@@ -269,7 +269,7 @@ export const StatusBadge = ({ status, time }: { status: string; time: number }) 
   );
 };
 ```
-```tsx {tab="oxfmt 格式化后(标准语义流)" group="badge" value="after"}
+```tsx {tab="oxfmt 格式化后(标准语义流)" value="after"}
 import React, { useMemo } from "react";
 
 import { CheckCircle2, Clock } from "lucide-react";

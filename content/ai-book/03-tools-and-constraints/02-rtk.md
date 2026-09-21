@@ -86,7 +86,7 @@ coverage: 82.4% of statements
 FAIL    myproject/internal/payment  0.182s
 FAIL
 ```
-```text {tab="rtk 代理过滤输出 (约 90 Tokens)" group="go_test" value="rtk"}
+```text {tab="rtk 代理过滤输出 (约 90 Tokens)" value="rtk"}
 FAILED: 1/32 tests (1 package failed)
 myproject/internal/payment:
   FAIL: TestRefund_ChannelTimeout
@@ -183,7 +183,7 @@ Total 6 (delta 4), reused 0 (delta 0), pack-reused 0
 To github.com:myteam/payservice.git
    b2f14aa..c99e120  feature/pay-fix -> feature/pay-fix
 ```
-```text {tab="rtk 代理输出 (原子状态)" group="git_status" value="rtk"}
+```text {tab="rtk 代理输出 (原子状态)" value="rtk"}
 $ rtk git push origin feature/pay-fix
 ok feature/pay-fix
 

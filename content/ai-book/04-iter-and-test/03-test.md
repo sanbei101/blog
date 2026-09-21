@@ -86,7 +86,7 @@ func TestLikePost(t *testing.T) {
 	}
 }
 ```
-```go {tab="真实容器集成测试 (引擎直接裁决)" group="test_paradigm" value="real"}
+```go {tab="真实容器集成测试 (引擎直接裁决)" value="real"}
 func TestLikePostIsIdempotent(t *testing.T) {
 	db := testutil.Postgres(t)
 	ctx := t.Context()

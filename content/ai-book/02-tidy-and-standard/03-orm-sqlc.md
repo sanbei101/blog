@@ -52,7 +52,7 @@ err := db.Table("users").
     Limit(10).
     Scan(&stats).Error
 ```
-```go {tab="GORM 原生 SQL (db.Raw)" group="orm_query" value="gorm_raw"}
+```go {tab="GORM 原生 SQL (db.Raw)" value="gorm_raw"}
 err := db.Raw(`
     SELECT 
         u.id AS user_id,
@@ -68,7 +68,7 @@ err := db.Raw(`
     LIMIT 10
 `, thirtyDaysAgo, tenantID, "active", minTotalAmount).Scan(&stats).Error
 ```
-```sql {tab="sqlc 源码声明 (query.sql)" group="orm_query" value="sqlc_query"}
+```sql {tab="sqlc 源码声明 (query.sql)" value="sqlc_query"}
 -- name: GetUserOrderStats :many
 SELECT
     u.id AS user_id,
@@ -83,7 +83,7 @@ HAVING SUM(o.amount) > sqlc.arg('min_total_amount')
 ORDER BY total_amount DESC
 LIMIT 10;
 ```
-```go {tab="sqlc 生成调用 (Go)" group="orm_query" value="sqlc_go"}
+```go {tab="sqlc 生成调用 (Go)" value="sqlc_go"}
 // 静态生成的强类型入参与结果接收
 rows, err := q.GetUserOrderStats(ctx, db.GetUserOrderStatsParams{
     ThirtyDaysAgo:  pgtype.Timestamptz{Time: thirtyDaysAgo, Valid: true},

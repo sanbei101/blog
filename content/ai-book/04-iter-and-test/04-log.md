@@ -46,7 +46,7 @@ if err := service.Publish(ctx, userID, postID); err != nil {
     return
 }
 ```
-```json {tab="生产级结构化事件 (字段化与链路分析)" group="log_format" value="json"}
+```json {tab="生产级结构化事件 (字段化与链路分析)" value="json"}
 {
   "time": "2026-09-08T14:20:31.120+08:00",
   "level": "error",

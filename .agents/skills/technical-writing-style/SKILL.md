@@ -83,12 +83,15 @@ description: >-
 mux := http.NewServeMux()
 mux.HandleFunc("GET /users/{id}", handleUser)
 ```
-
 ```go {tab="旧第三方库 (Gorilla Mux)" value="legacy"}
 r := mux.NewRouter()
 r.HandleFunc("/users/{id}", handleUser).Methods("GET")
 ```
 ````
+
+> [!CAUTION] Tabs 语法排坑必读
+> 1. **严禁在两个代码块之间留空行**:代码块的前后围栏必须紧邻(如上例第 4 行与第 5 行),否则会被 Markdown 解析器打散为独立的单标签卡片。
+> 2. **`group` 属性仅限首个代码块声明**:同组后续代码块**绝对不能重复声明 `group="..."`**,只能保留 `tab="..."` 和 `value="..."`。若后续代码块声明了 `group`,OINK 会将该代码块视为新组的起始节点,从而导致 Tab 横向合并失败。
 
 ### 2. 代码块标头与改动高亮(Code Titles & Diffs)
 * 生产级代码块必须使用 `{title="path/to/file.go"}` 标明源文件路径,避免裸代码块;
