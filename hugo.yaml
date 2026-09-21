@@ -81,9 +81,9 @@ params:
   # page_width: wide
 
 # Optional Google Analytics. Production builds only; previews stay untracked.
-# services:
-#   googleAnalytics:
-#     id: G-XXXXXXXXXX
+services:
+  googleAnalytics:
+    id: G-W4VQ12KR96
 
 module:
   imports:
