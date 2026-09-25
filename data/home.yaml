@@ -8,7 +8,7 @@ hero:
     - words: [{ text: Vibe Coding 的经验随笔}]
   actions:
     - { label: 语言和 Agent, url: ai-book/01-language-and-agent/, icon: fa-solid fa-robot, style: primary }
-    - { label: 技术栈推荐, url: ai-book/02-stack-selection/, icon: fa-solid fa-layer-group, style: ghost }
+    - { label: 整洁与规范, url: ai-book/02-tidy-and-standard/, icon: fa-solid fa-layer-group, style: ghost }
     - { label: 工具和约束, url: ai-book/03-tools-and-constraints/, icon: fa-solid fa-gears, style: ghost }
     - { label: 迭代与测试, url: ai-book/04-iter-and-test/, icon: fa-solid fa-rotate, style: ghost }
 
@@ -21,10 +21,10 @@ cards:
       desc: 为什么在 AI 时代依然首选 Go,以及怎么配置出你最舒服的 Agent。
       icon: fa-solid fa-robot
       url: ai-book/01-language-and-agent/
-    - title: Go 技术栈选型
-      desc: 我的 Go 项目常用库和选型原则。
+    - title: 整洁与规范
+      desc: 干净一点,快速一点
       icon: fa-solid fa-layer-group
-      url: ai-book/02-stack-selection/
+      url: ai-book/02-tidy-and-standard/
     - title: 工具和约束
       desc: 给 AI 装上工具,给 AI 缚上缰绳。
       icon: fa-solid fa-gears
