@@ -1,5 +1,5 @@
 ---
-title: 不猜瓶颈:pprof 剖析与 benchstat 验收
+title: "不猜瓶颈:pprof 剖析与 benchstat 验收"
 description: 定量性能分析制导与微基准测试验证
 weight: 20
 ---
@@ -222,22 +222,11 @@ benchstat old.txt new.txt
 
 `benchstat` 输出统计学对比报告:
 
-```text
-goos: darwin
-goarch: arm64
-pkg: internal/content
-                                  │   old.txt   │              new.txt               │
-                                  │   sec/op    │   sec/op     vs base               │
-SanitizeAndExtractTags-10           1240.0n ± 2%   92.3n ± 1%  -92.56% (p=0.008 n=5)
-
-                                  │   old.txt   │              new.txt               │
-                                  │    B/op     │    B/op      vs base               │
-SanitizeAndExtractTags-10            488.0 ± 0%     48.0 ± 0%  -90.16% (p=0.008 n=5)
-
-                                  │   old.txt   │              new.txt               │
-                                  │  allocs/op  │  allocs/op   vs base               │
-SanitizeAndExtractTags-10            11.00 ± 0%     1.00 ± 0%  -90.91% (p=0.008 n=5)
-```
+| Benchmark | Metric | old.txt | new.txt | vs base |
+|---|---|---|---|---|
+| SanitizeAndExtractTags-10 | sec/op | 1240.0n ± 2% | 92.3n ± 1% | -92.56% (p=0.008 n=5) |
+| SanitizeAndExtractTags-10 | B/op | 488.0 ± 0% | 48.0 ± 0% | -90.16% (p=0.008 n=5) |
+| SanitizeAndExtractTags-10 | allocs/op | 11.00 ± 0% | 1.00 ± 0% | -90.91% (p=0.008 n=5) |
 
 量化指标验证:
 - **单次执行延迟**:从 `1240.0ns` 降至 `92.3ns`(**降低 92.56%**);

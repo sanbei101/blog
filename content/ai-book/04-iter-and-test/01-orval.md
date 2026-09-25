@@ -12,7 +12,7 @@ weight: 10
 在缺乏确定性契约的场景下,依赖人工同步或通过自然语言让模型阅读 Git Diff 修改代码,容易消耗额外上下文,且极易出现类型遗漏或字段漂移。
 
 > [!TIP] 契约驱动与编译期防线
-> 将 OpenAPI 契约作为前后端唯一的沟通事实来源(Single Source of Truth)。后端代码注解自动派生 `swagger.yaml`,前端 Orval 自动生成强类型 React Query SDK。类型漂移与重构中断全部在 `tsc` 编译期硬性拦截。
+> 将 OpenAPI 契约作为前后端沟通的桥梁。后端代码注解自动派生 `swagger.yaml`,前端 Orval 自动生成强类型 React Query SDK。类型漂移与重构中断全部在 `tsc` 编译期硬性拦截。
 
 ```mermaid
 flowchart LR
@@ -51,17 +51,9 @@ func (h *LikeHandler) ListLikedPosts(w http.ResponseWriter, r *http.Request) {
 
 `swag` 会解析这些注解,连同 `render.Response[T]` 泛型结构体中的字段与 `json` 标签,统一输出为标准 OpenAPI 契约文件。接口与注释位于同一源码文件中,变更天然保持一致。
 
-通过 Makefile 构建契约:
-
-```makefile title="Makefile"
-swagger: swagger-fmt swagger-init
-
-swagger-init:
-	swag init -d internal/api,internal/pkg/render -g routes.go --parseInternal --v3.1 -ot yaml
+```bash
+swag init -d internal/api,internal/pkg/render -g routes.go --parseInternal --v3.1 -ot yaml
 ```
-
-执行 `make swagger` 后,在 `docs/swagger.yaml` 输出最新契约,将其同步至前端工程根目录。
-
 ---
 
 ## 前端强类型 SDK 自动生成
