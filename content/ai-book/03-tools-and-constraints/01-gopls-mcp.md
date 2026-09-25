@@ -1,5 +1,5 @@
 ---
-title: gopls MCP:Go 工程的编译期语义感知
+title: "Go MCP:用编译器内省取代文本检索"
 description: 基于 LSP 与 AST 消除文本检索幻觉与上下文冗余
 weight: 10
 ---

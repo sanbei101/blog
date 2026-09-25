@@ -1,6 +1,6 @@
 ---
-title: golangci-lint:基于静态分析的代码规范约束
-description: 采用 AST 与 SSA 分析器构建现代 version 2 配置架构,9 项核心规则全景代码对照与质量门禁
+title: "Linter: 规范从软约束变成硬门禁"
+description: 让 Linter 成为 AI 代码的第一道门禁
 weight: 40
 ---
 
@@ -17,12 +17,11 @@ weight: 40
 
 ---
 
-## 配置示例
+## Go 门禁:golangci-lint
 
-`golangci-lint` 在现代版本中推出了 `version: "2"` 配置架构,强化了 JSON Schema 规范校验、预设分组与更精准的检查器分类。以下是兼顾**严苛质量门禁**与**工程实用性**的标准基座配置:
+### 配置示例
 
-```yaml title=".golangci.yaml"
-# yaml-language-server: $schema=https://golangci-lint.run/jsonschema/golangci.jsonschema.json
+```yaml
 version: "2"
 run:
   tests: false
@@ -65,7 +64,7 @@ linters:
       - std-error-handling      # 排除标准库常见习惯误报,聚焦核心业务逻辑
 ```
 
-### 生产级配置选型权衡
+#### 生产级配置选型权衡
 
 1. **`default: standard`**:直接继承官方基石工具集,无需逐一显式声明即可获得编译器同级别的缺陷捕获能力。
 2. **`exclusions.presets` 过滤上下文噪声**:在自动化 Agent 协同场景中,终端诊断信息的信噪比至关重要。若将大量注释标点、历史遗留格式抛给模型,将极快消耗上下文窗口并引起无意义的代码抖动。通过预设排除规则,使 Agent 专注于代码逻辑、并发安全与性能损耗。
@@ -73,11 +72,11 @@ linters:
 
 ---
 
-## 核心规则代码攻防对比
+### 核心规则代码攻防对比
 
 以下针对配置中启用的关键规则,逐一展现**无静态规则约束时的典型缺陷代码**与**规则门禁严管下的防御性标准实现**。
 
-### 1. `bodyclose`:拦截 HTTP 套接字与文件描述符泄露
+#### 1. `bodyclose`:拦截 HTTP 套接字与文件描述符泄露
 
 模型在生成调用外部 HTTP 接口的代码时,最常见的疏漏是忽略响应体释放,或者将 `defer resp.Body.Close()` 放置在错误处理逻辑之前。
 
@@ -127,7 +126,7 @@ internal/gateway/client.go:8:2: response body must be closed (bodyclose)
 
 ---
 
-### 2. `errcheck`:拦截裸类型断言 Panic 与静默忽略 Error
+#### 2. `errcheck`:拦截裸类型断言 Panic 与静默忽略 Error
 
 开启 `check-type-assertions: true` 与 `check-blank: true`,将类型转换崩溃与静默异常彻底封死在编译期。
 
@@ -173,7 +172,7 @@ internal/auth/token.go:8:2: Error return value is not checked (errcheck)
 
 ---
 
-### 3. `errorlint`:修复错误链断裂与哨兵比较失效
+#### 3. `errorlint`:修复错误链断裂与哨兵比较失效
 
 Go 1.13+ 引入了标准化的错误包装协议(`%w` 与 `errors.Is` / `errors.As`)。模型常因吸收旧版本开源语料而回退至直接等号比对或 `%v` 截断。
 
@@ -217,7 +216,7 @@ internal/repository/order.go:10:10: non-wrapping format verb for fmt.Errorf. Use
 
 ---
 
-### 4. `canonicalheader`:消除 HTTP 报头大小写不合规导致的路由丢弃
+#### 4. `canonicalheader`:消除 HTTP 报头大小写不合规导致的路由丢弃
 
 在 `net/http` 体系中,`Header.Set` 会自动规范化大小写,但当模型直接初始化 `http.Header` 字典时,容易书写非标准小写报头。
 
@@ -257,7 +256,7 @@ internal/transport/forwarder.go:7:3: non-canonical header 'authorization' should
 
 ---
 
-### 5. `modernize`:淘汰远古手写循环,拥抱现代标准库原语
+#### 5. `modernize`:淘汰远古手写循环,拥抱现代标准库原语
 
 大模型习惯性套用 5 年前的惯用写法,在 Go 1.21+ 已原生支持高效泛型算法的背景下,手写冗长的样板代码。
 
@@ -303,7 +302,7 @@ internal/security/checker.go:12:2: if statement can be replaced with `min(config
 
 ---
 
-### 6. `usestdlibvars`:消除硬编码魔法字符串与魔数
+#### 6. `usestdlibvars`:消除硬编码魔法字符串与魔数
 
 模型在书写 HTTP 状态码、请求方法和协议常量时,极易使用生硬的魔数与裸字面量,极易诱发拼写偏差。
 
@@ -346,7 +345,7 @@ internal/api/handler.go:12:17: 200 can be replaced by `http.StatusOK` (usestdlib
 
 ---
 
-### 7. `perfsprint`:压制 `fmt.Sprintf` 引发的堆逃逸与微观分配
+#### 7. `perfsprint`:压制 `fmt.Sprintf` 引发的堆逃逸与微观分配
 
 模型在处理字符串拼接时最喜欢"无脑"调用 `fmt.Sprintf`,由此带来昂贵的反射解析和堆内存分配。
 
@@ -355,10 +354,10 @@ internal/api/handler.go:12:17: 200 can be replaced by `http.StatusOK` (usestdlib
 func BuildMetricKeys(tenantID int64, metric string, isAlert bool) (string, string) {
 	// 缺陷 1:fmt.Sprintf 内部调用 reflect 遍历格式化占位符,且入参装箱逃逸到堆
 	key := fmt.Sprintf("tenant:%d:%s", tenantID, metric)
-	
+
 	// 缺陷 2:简单布尔转字符串调用 Sprintf 产生多次堆分配
 	flag := fmt.Sprintf("%t", isAlert)
-	
+
 	return key, flag
 }
 ```
@@ -369,7 +368,7 @@ func BuildMetricKeys(tenantID int64, metric string, isAlert bool) (string, strin
 	// 使用原生字符串连接与单周期 strconv 转换,彻底消除堆逃逸与反射开销
 	key := "tenant:" + strconv.FormatInt(tenantID, 10) + ":" + metric
 	flag := strconv.FormatBool(isAlert)
-	
+
 	return key, flag
 }
 ```
@@ -383,7 +382,7 @@ internal/cache/key.go:7:10: fmt.Sprintf can be replaced with strconv.FormatBool 
 
 ---
 
-### 8. `gocritic`:SSA 级代码坏味道与大对象传值拷贝拦截
+#### 8. `gocritic`:SSA 级代码坏味道与大对象传值拷贝拦截
 
 开启 `performance` 与 `opinionated` 标签后,`gocritic` 能够深度遍历 SSA 中间表示,发现潜藏在语法之下的性能与结构坏味道。
 
@@ -444,7 +443,7 @@ internal/analyzer/stream.go:18:2: should rewrite switch statement to if statemen
 
 ---
 
-### 9. `revive`:清理僵尸形参,捍卫对外接口的真实契约
+#### 9. `revive`:清理僵尸形参,捍卫对外接口的真实契约
 
 模型在迭代更新代码时,经常删除某个特性的内部实现,却将该参数留在函数签名中,导致调用方产生误判。
 
@@ -476,7 +475,7 @@ internal/service/account.go:3:52: parameter 'enableAuditing' seems to be unused,
 
 ---
 
-## 建立 Agent 自动纠偏质量闭环
+### 建立 Agent 自动纠偏质量闭环
 
 静态检查门禁的终极价值在于构建一个**无人值守的自动化反馈闭环**。
 
@@ -500,4 +499,307 @@ internal/service/account.go:3:52: parameter 'enableAuditing' seems to be unused,
 3. **机器语义对齐**:提取精准的行号、规则类型与违背机理。
 4. **单点精准修复**:依据编译器与静态分析器的反馈生成定向 Diff 补丁。
 5. **门禁回归确认**:验证通过并汇报交付,确保代码库维持工业级整洁度。
+{.steps}
+
+---
+
+## 前端门禁:Oxc
+
+前端侧的威胁模型与后端同构:类型绕过、旧式语法与异步隐患同样无法依靠 `npm run build` 拦截。为此引入基于 Rust 开发的新一代前端工程工具链 [`Oxc`](https://oxc.rs),通过静态分析器与格式化器构建前端质量防护网:
+
+`oxlint` : 对标 ESLint,提供毫秒级执行效率与零配置开箱体验。
+`oxfmt` : 对标 Prettier,原生集成 Tailwind CSS 类名排序与 Import 依赖自动化排序。
+`oxc-transform` : 基于 Rust 实现的极速 JSX/TS 变换内核,剥离繁重的 Babel 插件链。
+{.fields}
+
+> [!TIP] Rust 工具链带来的毫秒级闭环
+> 前端工程门禁的核心痛点在于执行耗时。当 ESLint 扫描耗时数秒至数十秒时,Agent 的自动化纠错回路将被显著拉长。基于 Rust 的 Oxc 工具链将扫描与格式化延迟压缩至数十毫秒,实现即时确定性反馈。
+
+---
+
+当让 Agent 负责前端业务组件开发时:
+
+> *"在结算中心新增一个批量同步凭证与查看明细的抽屉组件,调用后端接口拉取数据,格式化展示并支持批量重试。"*
+
+代码生成后,终端执行 `npm run build` 打包成功,Agent 汇报组件完成且类型检查通过。但审查代码实现细节,往往会暴露明显的工程隐患:
+
+- 面对复杂嵌套数据,模型为规避类型报错容易使用 `const token = (user as any).auth?.token` 或 `user!.profile!.avatar!` 强行绕过 TypeScript 约束;
+- 生成旧时代语法:使用 `list[list.length - 1]` 索引尾部、使用 `list.filter(...).length > 0` 判定存在性、使用全局正则替换简单字符串;
+- 在批量异步操作中滥用 `items.forEach(async (item) => { ... })`,产生不受控的并发请求与无法捕获的浮动 Promise(Floating Promise);
+- Tailwind 类名无序堆叠,Import 依赖顺序混乱,降低可读性。
+
+---
+
+### 声明式开箱配置
+
+在人机协同开发中,繁琐的 `eslint.config.ts` 编排容易引入额外认知负担。`oxlint` 将检查规则收敛为清晰的语义大类:`correctness`(正确性)、`perf`(性能)、`pedantic`(严格规范)。
+
+在绝大多数项目中,使用极简的基础配置即可覆盖核心工程约束:
+
+```json title=".oxlintrc.json"
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "categories": {
+    "correctness": "error",
+    "perf": "warn"
+  },
+  "options": {
+    "typeAware": true,
+    "typeCheck": true
+  },
+  "rules": {},
+  "env": {
+    "builtin": true
+  }
+}
+```
+
+```json title=".oxfmtrc.json"
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "sortTailwindcss": true,
+  "sortImports": true
+}
+```
+
+这套配置通过 `typeAware` 拦截类型绕过与未捕获的异步 Promise,通过 `unicorn` 约束现代语法演进,最后依靠 `oxfmt` 统一样式类名与依赖排序。
+
+---
+
+### 拦截类型系统绕过
+
+面对联合类型或多层可选结构时,模型容易使用 `as any` 强转或 `!` 非空断言避开 `tsc` 报错。
+
+在配置中激活 TypeScript 原生类型推导后,分析器对类型穿透进行深度拦截。
+
+Agent 生成的提取用户信息逻辑:
+
+```typescript title="src/features/auth/session.ts"
+interface UserProfile {
+  id: string;
+  meta?: {
+    permissions?: string[];
+  };
+}
+
+export function extractAuthClaims(response: unknown, user?: UserProfile) {
+  // 缺陷 1: 面对 unknown 未做类型收窄, 直接使用 as any 强转
+  const payload = (response as any).data.claims;
+
+  // 缺陷 2: 使用非空断言 ! 强行消除编译检查
+  const primaryRole = user!.meta!.permissions![0];
+
+  return { payload, primaryRole };
+}
+```
+
+执行 `oxlint`,工具依托类型推导输出明确警告:
+
+```text
+src/features/auth/session.ts:11:19: typescript-eslint(no-explicit-any): Unexpected any. Specify a different type.
+src/features/auth/session.ts:14:23: typescript-eslint(no-non-null-assertion): Forbidden non-null assertion.
+src/features/auth/session.ts:14:34: typescript-eslint(no-non-null-assertion): Forbidden non-null assertion.
+```
+
+依据规则反馈,Agent 将其重构为具备类型守卫与防御性断言的实现:
+
+```diff title="src/features/auth/session.ts"
++interface ApiResponse {
++  data: {
++    claims: Record<string, unknown>;
++  };
++}
++
++function isApiResponse(val: unknown): val is ApiResponse {
++  return typeof val === "object" && val !== null && "data" in val;
++}
++
+ export function extractAuthClaims(response: unknown, user?: UserProfile) {
+-  const payload = (response as any).data.claims;
+-  const primaryRole = user!.meta!.permissions![0];
++  const payload = isApiResponse(response) ? response.data.claims : {};
++  const primaryRole = user?.meta?.permissions?.[0] ?? "GUEST";
+
+   return { payload, primaryRole };
+ }
+```
+
+---
+
+### 现代化语法规范约束
+
+大模型在生成数据处理工具时,可能采用历史旧版本的语法习惯。配置中引入的 `unicorn` 插件,可自动化规范 ECMAScript 语法演进。
+
+例如如下数据清洗工具函数:
+
+```typescript title="src/utils/format.ts"
+import path from "path";
+
+export function formatLogSummary(messages: string[], targetTag: string) {
+  // 低效实现 1: length - 1 索引尾部
+  const lastMsg = messages[messages.length - 1];
+
+  // 低效实现 2: filter + length 判定存在性产生冗余中间数组
+  const hasTag = messages.filter((msg) => msg === targetTag).length > 0;
+
+  // 低效实现 3: 简单全局替换仍使用正则表达式
+  const sanitized = targetTag.replace(/_/g, "-");
+
+  return { lastMsg, hasTag, sanitized };
+}
+```
+
+`unicorn` 规则捕获旧式语法:
+
+```text
+src/utils/format.ts:1:1: unicorn(prefer-node-protocol): Prefer `node:path` over `path`.
+src/utils/format.ts:5:19: unicorn(prefer-at): Use `messages.at(-1)` instead of `messages[messages.length - 1]`.
+src/utils/format.ts:8:18: unicorn(prefer-array-some): Prefer `.some(...)` over `.filter(...).length > 0`.
+src/utils/format.ts:11:21: unicorn(prefer-string-replace-all): Prefer `String#replaceAll()` over `String#replace()` with a regex with the global flag.
+```
+
+Agent 依据行号级诊断将其重构为现代规范:
+
+```diff title="src/utils/format.ts"
+-import path from "path";
++import path from "node:path";
+
+ export function formatLogSummary(messages: string[], targetTag: string) {
+-  const lastMsg = messages[messages.length - 1];
+-  const hasTag = messages.filter((msg) => msg === targetTag).length > 0;
+-  const sanitized = targetTag.replace(/_/g, "-");
++  const lastMsg = messages.at(-1) ?? "";
++  const hasTag = messages.some((msg) => msg === targetTag);
++  const sanitized = targetTag.replaceAll("_", "-");
+
+   return { lastMsg, hasTag, sanitized };
+ }
+```
+
+---
+
+### 识别与拦截异步并发隐患
+
+异步操作中的时序与异常隐患极难通过常规语法检查发现。通过激活 `options.typeAware: true`,`oxlint` 能够静态分析函数返回类型的生命周期。
+
+Agent 生成的批量配置同步逻辑:
+
+```typescript title="src/features/sync/syncManager.ts"
+import { fetchRemoteConfig, saveLocalConfig } from "@/api/config";
+
+export class SyncManager {
+  async syncAll(userIds: string[]) {
+    // 隐患 1: forEach 无法 await 异步回调
+    userIds.forEach(async (id) => {
+      const config = await fetchRemoteConfig(id);
+      saveLocalConfig(id, config); // 隐患 2: 未处理的浮动 Promise (Floating Promise)
+    });
+    console.log("All sync dispatched!");
+  }
+}
+```
+
+`oxlint` 静态指出错误:
+
+```text
+src/features/sync/syncManager.ts:8:5: typescript-eslint(no-misused-promises): Promise-returning function provided to attribute where a void return was expected.
+src/features/sync/syncManager.ts:10:7: typescript-eslint(no-floating-promises): Promises must be awaited, end with a call to .catch, or be explicitly marked with void.
+```
+
+依据反馈重构为具备时序控制与错误捕获的健壮实现:
+
+```diff title="src/features/sync/syncManager.ts"
+ export class SyncManager {
+   async syncAll(userIds: string[]) {
+-    userIds.forEach(async (id) => {
+-      const config = await fetchRemoteConfig(id);
+-      saveLocalConfig(id, config);
+-    });
+-    console.log("All sync dispatched!");
++    for (const id of userIds) {
++      try {
++        const config = await fetchRemoteConfig(id);
++        await saveLocalConfig(id, config);
++      } catch (error) {
++        console.error(`Sync failed for user ${id}:`, error);
++      }
++    }
++    console.log("All sync completed!");
+   }
+ }
+```
+
+---
+
+### 统一代码风格与样式排版
+
+`oxlint` 负责类型与逻辑正确性,`oxfmt` 则负责统一排版与视觉一致性。
+
+在编写包含大量 Tailwind 类名的组件时,大模型输出容易出现类名无序堆叠。`oxfmt` 原生支持类名与 Import 依赖自动化排序:
+
+```tsx {tab="格式化前(无序导入与类名交错)" group="badge" value="before"}
+import { Badge } from "@/components/ui/badge";
+import { CheckCircle2, Clock } from "lucide-react";
+import React, { useMemo } from "react";
+import { formatTimestamp } from "@/utils/time";
+
+export const StatusBadge = ({ status, time }: { status: string; time: number }) => {
+  return (
+    <div className="hover:bg-accent p-2 flex text-xs bg-muted font-medium border-border border rounded-md items-center text-foreground gap-2.5">
+      <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+      <span>{formatTimestamp(time)}</span>
+    </div>
+  );
+};
+```
+```tsx {tab="oxfmt 格式化后(标准语义流)" value="after"}
+import React, { useMemo } from "react";
+
+import { CheckCircle2, Clock } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { formatTimestamp } from "@/utils/time";
+
+export const StatusBadge = ({ status, time }: { status: string; time: number }) => {
+  return (
+    <div className="flex items-center gap-2.5 rounded-md border border-border bg-muted p-2 text-xs font-medium text-foreground hover:bg-accent">
+      <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+      <span>{formatTimestamp(time)}</span>
+    </div>
+  );
+};
+```
+
+Tailwind 类名标准化排序规则:
+布局定位(`flex items-center gap-2.5`) → 盒模型(`rounded-md border p-2`) → 排版色彩(`text-xs font-medium text-foreground`) → 交互状态(`hover:bg-accent`)。
+
+---
+
+### Agent 提示词配置与流水线闭环
+
+在前端工程的 `package.json` 中配置门禁脚本:
+
+```json title="package.json"
+{
+  "scripts": {
+    "lint": "oxlint",
+    "fmt": "oxfmt"
+  }
+}
+```
+
+在工程规范文件(如 `AGENTS.md`)中约束执行流程:
+
+```markdown title="AGENTS.md"
+### 前端代码质量门禁
+**执行要求**:任何 TypeScript 代码新增或重构完成后,必须在终端依次运行 `pnpm fmt` 与 `pnpm lint` 并确保通过。
+```
+
+自动化代码治理闭环:
+
+1. **业务功能开发**:Agent 根据需求实现 UI 交互与数据逻辑。
+2. **样式与依赖排版 (`pnpm fmt`)**:`oxfmt` 原生重排 Import 依赖并按盒模型流排序 Tailwind 类名。
+3. **类型感知分析 (`pnpm lint`)**:`oxlint` 激活 `typeAware` 与 `unicorn` 规则拦截类型穿透与浮动 Promise。
+4. **即时定向重构**:依据行号级诊断实施单点修复,保证代码库的高一致性。
 {.steps}

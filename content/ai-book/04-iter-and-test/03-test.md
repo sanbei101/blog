@@ -1,5 +1,5 @@
 ---
-title: Go 全面测试:单元测试、容器化集成测试与 synctest 虚拟时间
+title: 真实测试:别让错误越走越远
 description: 划分测试边界,消除伪造 Mock 的逻辑幻觉
 weight: 30
 ---

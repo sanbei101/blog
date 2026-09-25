@@ -1,5 +1,5 @@
 ---
-title: 基于 pprof 与 benchstat 的单点性能重构闭环
+title: 不猜瓶颈:pprof 剖析与 benchstat 验收
 description: 定量性能分析制导与微基准测试验证
 weight: 20
 ---

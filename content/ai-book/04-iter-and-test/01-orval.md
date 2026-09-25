@@ -1,5 +1,5 @@
 ---
-title: 契约驱动协同:基于 OpenAPI 与 Orval 的端到端类型流转
+title: "一份契约,两端编译:OpenAPI + Orval"
 description: 用结构化契约替代文本对齐,构建端到端编译期安全防线
 weight: 10
 ---

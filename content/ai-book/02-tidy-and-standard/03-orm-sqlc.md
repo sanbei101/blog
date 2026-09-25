@@ -1,5 +1,5 @@
 ---
-title: 用 sqlc 替代 ORM
+title: SQL 即源码:用 sqlc 构建零反射数据访问层
 description: 编译期类型检查与零反射数据访问层的工程实践
 weight: 30
 ---
