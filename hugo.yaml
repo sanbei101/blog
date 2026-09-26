@@ -1,3 +1,4 @@
+baseURL: https://blog.sanbei101.cn
 title: Sanbei的博客
 defaultContentLanguage: zh
 enableGitInfo: true
