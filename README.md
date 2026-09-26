@@ -7,7 +7,7 @@
 </p>
 
 [![Website](https://img.shields.io/badge/在线博客-blog.sanbei101.cn-2563eb?style=flat-square&logo=google-chrome&logoColor=white)](https://blog.sanbei101.cn)
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
+[![Go Version](https://img.shields.io/badge/Go-1.27+-00ADD8?style=flat-square&logo=go&logoColor=white)](https://go.dev)
 [![Site Engine](https://img.shields.io/badge/Engine-Hugo_Extended-FF4088?style=flat-square&logo=hugo&logoColor=white)](https://gohugo.io)
 [![Theme](https://img.shields.io/badge/Theme-OINK-6366f1?style=flat-square)](https://github.com/pgsty/oink)
 [![License](https://img.shields.io/badge/License-MIT-10b981?style=flat-square)](LICENSE)
