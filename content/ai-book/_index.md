@@ -1,6 +1,6 @@
 ---
 title: AI 使用经验
-description: 记录 Golang 开发(顺便带有一点前端)的AI使用心得
+description: 记录 Golang 全栈开发的AI和技术心得
 type: book
 book_kind: book
 sidebar_root_for: self
