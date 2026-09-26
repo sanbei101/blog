@@ -12,6 +12,8 @@
 [![Theme](https://img.shields.io/badge/Theme-OINK-6366f1?style=flat-square)](https://github.com/pgsty/oink)
 [![License](https://img.shields.io/badge/License-MIT-10b981?style=flat-square)](LICENSE)
 
+</div>
+
 <br/>
 
 > 很多关于 AI 编程的讨论往往停留在"哪个工具好用"或脱离工程现场的泛泛而谈。但当系统规模变大、业务充满并发与副作用时,真正决定上限的不是让模型自由发挥,而是工程师如何**铺平代码基座、明确接口契约并建立确定性的验证闭环**。
